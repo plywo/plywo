@@ -1,6 +1,7 @@
 require "json"
 require "optparse"
 require_relative "behavioral_diff"
+require_relative "report_renderer"
 
 module Plywo
   class CLI
@@ -43,37 +44,13 @@ module Plywo
         candidate: read_measurements(options.fetch(:candidate))
       )
 
-      @stdout.puts(options[:format] == "json" ? JSON.pretty_generate(result) : render_markdown(result))
+      @stdout.puts(options[:format] == "json" ? JSON.pretty_generate(result) : ReportRenderer.markdown(result))
       options[:fail_on_regression] && result.fetch("decision") == "regression" ? 1 : 0
     end
 
     def read_measurements(path)
       parsed = JSON.parse(File.read(path))
       parsed.fetch("measurements", parsed)
-    end
-
-    def render_markdown(result)
-      lines = ["## Plywo Behavioral Diff", ""]
-      if result.fetch("findings").empty?
-        lines << "✅ No behavioral regression detected."
-      else
-        lines << "🟡 Tests may pass, but Plywo detected **#{result.fetch("findings").size} behavioral regressions**."
-      end
-
-      lines += ["", "| Signal | Baseline | Candidate | Change |", "| --- | ---: | ---: | ---: |"]
-      result.fetch("signals").each do |signal, values|
-        marker = values.fetch("regression") ? " ⚠" : ""
-        lines << "| `#{signal}` | #{values.fetch("baseline")} | #{values.fetch("candidate")} | #{values.fetch("display_delta")}#{marker} |"
-      end
-
-      unless result.fetch("findings").empty?
-        lines += ["", "### Findings", ""]
-        result.fetch("findings").each do |finding|
-          lines << "- **#{finding.fetch("reason_code")}** · `#{finding.fetch("signal")}` · #{finding.fetch("severity")}"
-        end
-      end
-
-      lines.join("\n")
     end
 
     def usage
