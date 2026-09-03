@@ -74,4 +74,4 @@ bin/plywo diff \
 
 ## Current status
 
-The diff core and first Rails runtime capture are real. The next product-facing slice is to run baseline/candidate subjects from Git worktrees or preview environments and publish the resulting report back to GitHub.
+The diff core and first Rails runtime capture are real and green in CI. The next product-facing slice is to run baseline/candidate subjects from Git worktrees or preview environments and publish the resulting report back to GitHub.
