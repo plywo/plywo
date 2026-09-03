@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plywo.com/schemas/execution-v1.schema.json",
+  "title": "Plywo Execution v1",
+  "type": "object",
+  "required": ["schema_version", "execution_id", "run_id", "scenario_id", "subject", "status"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "execution_id": {"type": "string"},
+    "run_id": {"type": "string"},
+    "scenario_id": {"type": "string"},
+    "subject": {"enum": ["baseline", "candidate"]},
+    "subject_ref": {"type": "string"},
+    "status": {"enum": ["queued", "in_progress", "completed", "failed"]},
+    "driver": {"type": ["string", "null"]},
+    "environment": {"type": ["string", "null"]},
+    "trace_ids": {"type": "array", "items": {"type": "string"}},
+    "artifacts": {"type": "array", "items": {"type": "object"}},
+    "measurements": {"type": "object"}
+  },
+  "additionalProperties": true
+}

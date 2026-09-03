@@ -1,0 +1,12 @@
+{
+  "subject": "main@abc123",
+  "scenario": "signup-create-project",
+  "measurements": {
+    "duration_ms": 820,
+    "sql_queries": 14,
+    "background_jobs": 1,
+    "emails": 1,
+    "http_requests": 11,
+    "errors": 0
+  }
+}

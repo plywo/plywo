@@ -1,0 +1,12 @@
+{
+  "subject": "pr-42@def456",
+  "scenario": "signup-create-project",
+  "measurements": {
+    "duration_ms": 1460,
+    "sql_queries": 47,
+    "background_jobs": 3,
+    "emails": 2,
+    "http_requests": 11,
+    "errors": 0
+  }
+}

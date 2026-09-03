@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4.10"
+          bundler-cache: true
+
+      - name: Test
+        run: bin/rails test
+
+      - name: Demo behavioral diff
+        run: |
+          bin/plywo diff \
+            --baseline examples/behavioral-diff/main.json \
+            --candidate examples/behavioral-diff/candidate.json \
+            --format json > /tmp/plywo-result.json
+          cat /tmp/plywo-result.json
+
+      - name: Brakeman
+        run: bundle exec brakeman --no-pager
+
+      - name: RuboCop
+        run: bundle exec rubocop
