@@ -15,6 +15,18 @@ namespace :plywo do
     abort "Plywo detected a behavioral regression" if ENV["FAIL_ON_REGRESSION"] == "1" && result.fetch("decision") == "regression"
   end
 
+  desc "Compose two captured executions into one behavioral comparison payload"
+  task compare_executions: :environment do
+    baseline = JSON.parse(File.read(ENV.fetch("PLYWO_BASELINE_INPUT")))
+    candidate = JSON.parse(File.read(ENV.fetch("PLYWO_CANDIDATE_INPUT")))
+    payload = Plywo::ExecutionPair.call(baseline:, candidate:)
+
+    puts Plywo::ReportRenderer.markdown(payload.fetch("result"))
+    puts
+    puts JSON.pretty_generate(payload)
+    File.write(ENV.fetch("PLYWO_OUTPUT"), JSON.pretty_generate(payload)) if ENV["PLYWO_OUTPUT"]
+  end
+
   desc "Render and optionally publish the durable Plywo GitHub PR comment"
   task github_comment: :environment do
     payload = JSON.parse(File.read(ENV.fetch("PLYWO_INPUT")))
