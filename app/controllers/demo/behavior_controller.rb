@@ -11,8 +11,10 @@ module Demo
     def create
       profile = PROFILES.fetch(Current.plywo_subject.to_s, PROFILES.fetch("baseline"))
 
-      profile.fetch(:sql_queries).times do
-        ApplicationRecord.connection.select_value("SELECT 1")
+      ApplicationRecord.uncached do
+        profile.fetch(:sql_queries).times do
+          ApplicationRecord.connection.select_value("SELECT 1")
+        end
       end
 
       profile.fetch(:background_jobs).times do
