@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: plywo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d plywo_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/plywo_test
+      RAILS_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4.10"
+          bundler-cache: true
+
+      - name: Prepare database
+        run: bin/rails db:prepare
+
+      - name: Test
+        run: bin/rails test
+
+      - name: Dogfood Rails execution capture
+        env:
+          PLYWO_OUTPUT: tmp/plywo-dogfood.json
+        run: bin/rails plywo:dogfood
+
+      - name: Publish Plywo GitHub feedback
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PLYWO_INPUT: tmp/plywo-dogfood.json
+          PLYWO_PUBLISH: "1"
+          PLYWO_COMMENT_AUTHOR: github-actions[bot]
+          PLYWO_BOOTSTRAP_BASELINE: "1"
+          PLYWO_BASELINE_LABEL: dogfood-baseline
+          PLYWO_BASELINE_SHA: synthetic
+          PLYWO_CANDIDATE_LABEL: ${{ github.head_ref }}
+          PLYWO_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+          PLYWO_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bin/rails plywo:github_comment
+
+      - name: Demo portable behavioral diff
+        run: |
+          bin/plywo diff \
+            --baseline examples/behavioral-diff/main.json \
+            --candidate examples/behavioral-diff/candidate.json \
+            --format json > /tmp/plywo-result.json
+          cat /tmp/plywo-result.json
+
+      - name: Brakeman
+        run: bundle exec brakeman --no-pager
+
+      - name: RuboCop
+        run: bundle exec rubocop
