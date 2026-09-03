@@ -9,6 +9,25 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: plywo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d plywo_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/plywo_test
+      RAILS_ENV: test
+
     steps:
       - uses: actions/checkout@v4
 
@@ -17,10 +36,16 @@ jobs:
           ruby-version: "3.4.10"
           bundler-cache: true
 
+      - name: Prepare database
+        run: bin/rails db:prepare
+
       - name: Test
         run: bin/rails test
 
-      - name: Demo behavioral diff
+      - name: Dogfood Rails execution capture
+        run: bin/rails plywo:dogfood
+
+      - name: Demo portable behavioral diff
         run: |
           bin/plywo diff \
             --baseline examples/behavioral-diff/main.json \
