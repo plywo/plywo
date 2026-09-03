@@ -12,6 +12,8 @@ Plywo owns one durable comment identified by a hidden marker and updates it on e
 <!-- plywo:behavioral-diff:v1 -->
 ```
 
+Ownership is scoped by both the marker and the publishing GitHub actor. GitHub Actions currently uses `github-actions[bot]`. A future GitHub App can supply its own actor identity without changing the result or rendering contracts. This prevents Plywo automation from attempting to edit a matching comment owned by a human or another integration.
+
 The comment contains:
 
 - merge recommendation and regression count;

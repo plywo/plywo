@@ -49,7 +49,8 @@ namespace :plywo do
     action = publisher.upsert(
       repository: ENV.fetch("GITHUB_REPOSITORY"),
       pr_number: Integer(pr_number),
-      body: markdown
+      body: markdown,
+      author: ENV["PLYWO_COMMENT_AUTHOR"]
     )
     puts "Plywo GitHub comment #{action}."
   end

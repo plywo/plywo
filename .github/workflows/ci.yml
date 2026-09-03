@@ -60,6 +60,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PLYWO_INPUT: tmp/plywo-dogfood.json
           PLYWO_PUBLISH: "1"
+          PLYWO_COMMENT_AUTHOR: github-actions[bot]
           PLYWO_BOOTSTRAP_BASELINE: "1"
           PLYWO_BASELINE_LABEL: dogfood-baseline
           PLYWO_BASELINE_SHA: synthetic

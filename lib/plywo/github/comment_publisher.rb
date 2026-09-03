@@ -10,9 +10,9 @@ module Plywo
         @api_url = api_url.sub(%r{/+$}, "")
       end
 
-      def upsert(repository:, pr_number:, body:)
+      def upsert(repository:, pr_number:, body:, author: nil)
         comments = request(:get, "/repos/#{repository}/issues/#{pr_number}/comments?per_page=100")
-        existing = comments.find { |comment| comment.fetch("body", "").include?(CommentRenderer::MARKER) }
+        existing = comments.find { |comment| owned_comment?(comment, author:) }
 
         if existing
           request(:patch, "/repos/#{repository}/issues/comments/#{existing.fetch("id")}", body: { body: })
@@ -24,6 +24,12 @@ module Plywo
       end
 
       private
+
+      def owned_comment?(comment, author:)
+        marker_matches = comment.fetch("body", "").include?(CommentRenderer::MARKER)
+        author_matches = author.nil? || comment.dig("user", "login") == author
+        marker_matches && author_matches
+      end
 
       def request(method, path, body: nil)
         uri = URI("#{@api_url}#{path}")
