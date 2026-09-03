@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -30,6 +35,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -43,7 +50,23 @@ jobs:
         run: bin/rails test
 
       - name: Dogfood Rails execution capture
+        env:
+          PLYWO_OUTPUT: tmp/plywo-dogfood.json
         run: bin/rails plywo:dogfood
+
+      - name: Publish Plywo GitHub feedback
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PLYWO_INPUT: tmp/plywo-dogfood.json
+          PLYWO_PUBLISH: "1"
+          PLYWO_BOOTSTRAP_BASELINE: "1"
+          PLYWO_BASELINE_LABEL: dogfood-baseline
+          PLYWO_BASELINE_SHA: synthetic
+          PLYWO_CANDIDATE_LABEL: ${{ github.head_ref }}
+          PLYWO_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+          PLYWO_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bin/rails plywo:github_comment
 
       - name: Demo portable behavioral diff
         run: |
