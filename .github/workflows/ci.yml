@@ -123,6 +123,7 @@ jobs:
           PLYWO_BASELINE_SHA: ${{ github.event.pull_request.base.sha }}
           PLYWO_CANDIDATE_LABEL: ${{ github.head_ref }}
           PLYWO_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+          PLYWO_EXECUTION_MODE: exact Git worktrees + isolated PostgreSQL databases
           PLYWO_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: bin/rails plywo:github_comment
 

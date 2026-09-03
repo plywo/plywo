@@ -45,6 +45,7 @@ namespace :plywo do
       candidate_label: ENV["PLYWO_CANDIDATE_LABEL"] || event.dig("pull_request", "head", "ref"),
       candidate_sha: ENV["PLYWO_CANDIDATE_SHA"] || event.dig("pull_request", "head", "sha"),
       bootstrap_baseline: ENV["PLYWO_BOOTSTRAP_BASELINE"],
+      execution_mode: ENV["PLYWO_EXECUTION_MODE"],
       run_url: ENV["PLYWO_RUN_URL"]
     }
     markdown = Plywo::Github::CommentRenderer.markdown(payload:, context:)

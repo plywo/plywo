@@ -58,10 +58,11 @@ module Plywo
           severity_summary = %w[critical high medium low].filter_map do |severity|
             "#{counts.fetch(severity)} #{severity}" if counts.key?(severity)
           end.join(" · ")
+          regression_label = findings.one? ? "regression" : "regressions"
 
           "> [!WARNING]\n> **Behavior changed while the functional scenario still passes.** " \
             "Merge recommendation: **#{result.fetch("merge_recommendation").upcase}** · " \
-            "#{findings.size} regressions · #{severity_summary}."
+            "#{findings.size} #{regression_label} · #{severity_summary}."
         end
       end
 
@@ -98,24 +99,22 @@ module Plywo
       def execution_section
         baseline = executions.fetch("baseline")
         candidate = executions.fetch("candidate")
-
-        [
+        lines = [
           "<details>",
           "<summary><strong>Execution context</strong></summary>",
           "",
           "| Subject | Ref | SHA | Functional | Correlation |",
           "| --- | --- | --- | --- | --- |",
-          "| Baseline | `#{context("baseline_label", "dogfood baseline")}` | `#{short_sha(context("baseline_sha", "synthetic"))}` | " \
+          "| Baseline | `#{context("baseline_label", "dogfood baseline")}` | #{sha_markdown(context("baseline_sha", "synthetic"))} | " \
             "#{status_icon(baseline)} | #{correlation_icon(baseline)} |",
-          "| Candidate | `#{context("candidate_label", "candidate")}` | `#{short_sha(context("candidate_sha", "unknown"))}` | " \
+          "| Candidate | `#{context("candidate_label", "candidate")}` | #{sha_markdown(context("candidate_sha", "unknown"))} | " \
             "#{status_icon(candidate)} | #{correlation_icon(candidate)} |",
           "",
           "Run: `#{@payload.fetch("run_id")}`  ",
-          "Scenario: `#{@payload.fetch("scenario_id")}`",
-          "",
-          "</details>",
-          ""
+          "Scenario: `#{@payload.fetch("scenario_id")}`"
         ]
+        lines << "Evidence: #{context("execution_mode")}" if context("execution_mode")
+        lines.concat([ "", "</details>", "" ])
       end
 
       def bootstrap_note
@@ -129,6 +128,7 @@ module Plywo
       def footer
         links = []
         links << "[Actions run](#{context("run_url")})" if context("run_url")
+        links << "[Source diff](#{source_diff_url})" if source_diff_url
         links << "`#{context("repository")}`" if context("repository")
         links << "PR ##{context("pr_number")}" if context("pr_number")
 
@@ -151,8 +151,27 @@ module Plywo
         execution.fetch("correlation_confirmed") ? "✅ confirmed" : "❌ missing"
       end
 
+      def sha_markdown(value)
+        value = value.to_s
+        return "`#{short_sha(value)}`" unless linkable_sha?(value)
+
+        "[`#{short_sha(value)}`](https://github.com/#{context("repository")}/commit/#{value})"
+      end
+
       def short_sha(value)
         value.to_s == "synthetic" ? value : value.to_s[0, 8]
+      end
+
+      def source_diff_url
+        baseline_sha = context("baseline_sha").to_s
+        candidate_sha = context("candidate_sha").to_s
+        return unless linkable_sha?(baseline_sha) && linkable_sha?(candidate_sha)
+
+        "https://github.com/#{context("repository")}/compare/#{baseline_sha}...#{candidate_sha}"
+      end
+
+      def linkable_sha?(value)
+        context("repository") && !value.empty? && !%w[synthetic unknown].include?(value)
       end
 
       def bootstrap_baseline?
