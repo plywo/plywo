@@ -16,7 +16,32 @@ PR   + scenario ─┘
 
 Both functional executions may pass. Plywo can still detect changes in latency, SQL queries, background jobs, external side effects, memory, network behavior, or other runtime evidence.
 
-Try the current portable prototype:
+## Dogfood Plywo with Plywo
+
+The Rails app now has a real local-only execution probe. It runs two HTTP executions through the Rails middleware stack, propagates Plywo correlation headers, observes Rails notifications, and feeds captured evidence into the same portable behavioral diff engine.
+
+```bash
+bin/rails db:prepare
+bin/rails plywo:dogfood
+```
+
+The demo intentionally keeps both executions functionally green while the candidate performs more SQL, enqueues more jobs, emits a duplicate email side effect, and takes longer.
+
+The capture path is real:
+
+```text
+Rack request
+  -> X-Plywo-Run-Id / X-Plywo-Execution-Id / X-Plywo-Subject
+  -> Rails middleware + controller
+  -> ActiveSupport::Notifications
+       SQL / ActiveJob / request / side effects
+  -> Plywo::Rails::EvidenceCollector
+  -> Plywo::BehavioralDiff
+```
+
+## Portable diff
+
+The core comparison command remains Rails-independent:
 
 ```bash
 bin/plywo diff \
@@ -37,8 +62,8 @@ bin/plywo diff \
 
 - `docs/` - product thesis, architecture, decisions, RFCs, demo, roadmap
 - `schemas/` - machine-readable execution/result contracts
-- `lib/plywo/` - portable core without Rails dependencies
-- `app/` - Rails product shell and orchestration
+- `lib/plywo/` - portable core plus Rails adapters/probes behind explicit namespaces
+- `app/` - Rails product shell and dogfood target
 - `examples/` - deterministic demo evidence
 
 ## Runtime
@@ -49,4 +74,4 @@ bin/plywo diff \
 
 ## Current status
 
-Bootstrap slice. The diff core is real and runnable. Runtime capture, GitHub App integration, Playwright orchestration, OpenTelemetry ingestion, CLI/mobile adapters, and object-storage artifacts come next.
+The diff core and first Rails runtime capture are real. The next product-facing slice is to run baseline/candidate subjects from Git worktrees or preview environments and publish the resulting report back to GitHub.
