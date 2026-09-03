@@ -63,7 +63,8 @@ namespace :plywo do
       repository: ENV.fetch("GITHUB_REPOSITORY"),
       pr_number: Integer(pr_number),
       body: markdown,
-      author: ENV["PLYWO_COMMENT_AUTHOR"]
+      author: ENV["PLYWO_COMMENT_AUTHOR"],
+      expected_head_sha: context.fetch(:candidate_sha)
     )
     puts "Plywo GitHub comment #{action}."
   end
