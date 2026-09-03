@@ -13,7 +13,7 @@ module Plywo
       end
 
       def call
-        raise "Plywo dogfood runner is only available in development and test" unless Rails.env.development? || Rails.env.test?
+        raise "Plywo dogfood runner is only available in development and test" unless ::Rails.env.development? || ::Rails.env.test?
 
         warm_runtime
         run_id = SecureRandom.uuid
@@ -66,7 +66,7 @@ module Plywo
       end
 
       def request
-        @request ||= Rack::MockRequest.new(Rails.application)
+        @request ||= Rack::MockRequest.new(::Rails.application)
       end
 
       def headers(subject:, execution_id:, run_id:)
