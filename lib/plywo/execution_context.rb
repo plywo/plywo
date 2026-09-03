@@ -12,7 +12,7 @@ module Plywo
       ) do
         status, headers, body = @app.call(env)
         headers["X-Plywo-Execution-Id"] ||= Current.plywo_execution_id if Current.plywo_execution_id
-        [status, headers, body]
+        [ status, headers, body ]
       end
     end
   end
