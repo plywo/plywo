@@ -1,24 +1,35 @@
 module Plywo
   module Rails
     class TestQueueExecution
-      def self.drain(execution_id:, adapter: ActiveJob::Base.queue_adapter)
-        new(execution_id:, adapter:).drain
+      DEFAULT_MAX_JOBS = 1_000
+
+      def self.drain(execution_id:, adapter: ActiveJob::Base.queue_adapter, max_jobs: DEFAULT_MAX_JOBS)
+        new(execution_id:, adapter:, max_jobs:).drain
       end
 
-      def initialize(execution_id:, adapter:)
+      def initialize(execution_id:, adapter:, max_jobs:)
         @execution_id = execution_id.to_s
         @adapter = adapter
+        @max_jobs = Integer(max_jobs)
       end
 
       def drain
-        jobs = matching_jobs
-        jobs.each { |job_data| @adapter.enqueued_jobs.delete(job_data) }
-
+        executions = []
         Current.reset
 
-        jobs.map do |job_data|
-          execute(job_data)
+        loop do
+          jobs = matching_jobs
+          break if jobs.empty?
+
+          if executions.size + jobs.size > @max_jobs
+            raise "Execution #{@execution_id} exceeded #{@max_jobs} correlated TestAdapter jobs"
+          end
+
+          jobs.each { |job_data| @adapter.enqueued_jobs.delete(job_data) }
+          executions.concat(jobs.map { |job_data| execute(job_data) })
         end
+
+        executions
       ensure
         Current.reset
       end
