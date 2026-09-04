@@ -54,6 +54,9 @@ jobs:
       - name: Test
         run: bin/rails test
 
+      - name: Dogfood durable worker evidence
+        run: bundle exec ruby script/plywo_durable_worker_evidence.rb
+
       - name: Dogfood Rails instrumentation
         env:
           PLYWO_OUTPUT: tmp/plywo-dogfood.json
