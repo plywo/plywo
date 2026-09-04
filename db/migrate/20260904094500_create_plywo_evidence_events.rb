@@ -9,7 +9,7 @@ class CreatePlywoEvidenceEvents < ActiveRecord::Migration[8.1]
       t.integer :start_line
       t.integer :end_line
       t.string :confidence
-      t.jsonb :attributes, null: false, default: {}
+      t.jsonb :payload, null: false, default: {}
       t.string :producer_kind, null: false
       t.string :producer_name
       t.string :producer_id
