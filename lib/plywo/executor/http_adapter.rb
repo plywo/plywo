@@ -10,6 +10,7 @@ module Plywo
 
       DEFAULT_OPEN_TIMEOUT_SECONDS = 5
       DEFAULT_READ_TIMEOUT_SECONDS = 2_100
+      DEFAULT_CONTROL_READ_TIMEOUT_SECONDS = 30
 
       class NetHttpTransport
         def call(uri:, headers:, body:, open_timeout:, read_timeout:)
@@ -79,7 +80,7 @@ module Plywo
           headers: control_headers,
           body: JSON.generate("reason" => reason.to_s),
           open_timeout: @open_timeout,
-          read_timeout: @read_timeout
+          read_timeout: control_read_timeout
         )
 
         unless response.status.between?(200, 299)
@@ -115,6 +116,10 @@ module Plywo
           "Authorization" => "Bearer #{@token}",
           "Content-Type" => "application/json"
         }
+      end
+
+      def control_read_timeout
+        [ @read_timeout, DEFAULT_CONTROL_READ_TIMEOUT_SECONDS ].min
       end
 
       def cancellation_uri(execution_id:, attempt_number:)
