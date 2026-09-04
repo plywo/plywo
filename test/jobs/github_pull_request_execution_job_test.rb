@@ -36,15 +36,17 @@ class GithubPullRequestExecutionJobTest < ActiveJob::TestCase
     perform_job(execution:, client:, executor:, publisher:)
 
     execution.reload
+    request = executor.requests.first
     assert_equal "completed", execution.status
     assert_equal "allow", execution.decision
     assert_equal "allow", execution.outcome
     assert_equal 1, execution.attempt_count
     assert_equal payload, execution.result
     assert_equal 1, executor.calls
-    assert_equal execution.execution_id, executor.requests.one.execution_id
-    assert_equal 1, executor.requests.one.attempt_number
-    refute_includes executor.requests.one.context, "installation_id"
+    assert_equal 1, executor.requests.length
+    assert_equal execution.execution_id, request.execution_id
+    assert_equal 1, request.attempt_number
+    refute_includes request.context, "installation_id"
     assert_equal 1, publisher.calls
   end
 
