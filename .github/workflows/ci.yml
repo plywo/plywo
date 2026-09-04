@@ -36,6 +36,7 @@ jobs:
 
     env:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/plywo_test
+      SOLID_QUEUE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/plywo_queue_test
       RAILS_ENV: test
 
     steps:
@@ -59,6 +60,12 @@ jobs:
 
       - name: Dogfood isolated worker process
         run: bundle exec ruby script/plywo_os_process_worker_proof.rb
+
+      - name: Dogfood Solid Queue transport
+        env:
+          PLYWO_SOLID_QUEUE: "1"
+          SOLID_QUEUE_SKIP_RECURRING: "true"
+        run: bundle exec ruby script/plywo_solid_queue_transport_proof.rb
 
       - name: Dogfood Rails instrumentation
         env:
