@@ -53,7 +53,7 @@ module Plywo
         repository_capability = @repository_capability_provider&.call(request:)
         response = @transport.call(
           uri: @uri,
-          headers: headers(request:, repository_capability:),
+          headers: execution_headers(request:, repository_capability:),
           body: JSON.generate(request.to_h),
           open_timeout: @open_timeout,
           read_timeout: @read_timeout
@@ -73,6 +73,22 @@ module Plywo
         raise Error, "Remote executor returned an invalid result: #{error.message}"
       end
 
+      def cancel(execution_id:, attempt_number:, reason: "control_plane_cancelled")
+        response = @transport.call(
+          uri: cancellation_uri(execution_id:, attempt_number:),
+          headers: control_headers,
+          body: JSON.generate("reason" => reason.to_s),
+          open_timeout: @open_timeout,
+          read_timeout: @read_timeout
+        )
+
+        unless response.status.between?(200, 299)
+          raise Error, "Remote executor cancellation returned HTTP #{response.status}"
+        end
+
+        true
+      end
+
       private
 
       def validate_configuration!
@@ -83,17 +99,30 @@ module Plywo
         raise Error, "Remote executor read timeout must be positive" unless @read_timeout.positive?
       end
 
-      def headers(request:, repository_capability:)
-        headers = {
-          "Accept" => "application/json",
-          "Authorization" => "Bearer #{@token}",
-          "Content-Type" => "application/json",
+      def execution_headers(request:, repository_capability:)
+        headers = control_headers.merge(
           "Idempotency-Key" => "#{request.execution_id}:#{request.attempt_number}"
-        }
+        )
         if repository_capability
           headers[RepositoryCapability::HEADER] = repository_capability.authorization_header
         end
         headers
+      end
+
+      def control_headers
+        {
+          "Accept" => "application/json",
+          "Authorization" => "Bearer #{@token}",
+          "Content-Type" => "application/json"
+        }
+      end
+
+      def cancellation_uri(execution_id:, attempt_number:)
+        uri = @uri.dup
+        base_path = uri.path.sub(%r{/+$}, "")
+        encoded_execution_id = URI.encode_www_form_component(execution_id.to_s)
+        uri.path = "#{base_path}/#{encoded_execution_id}/attempts/#{Integer(attempt_number)}/cancel"
+        uri
       end
     end
   end
