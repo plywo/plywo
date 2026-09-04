@@ -10,7 +10,14 @@ module Executor
       payload = JSON.parse(request.raw_post)
       return render_error("Executor request must be a JSON object", status: :unprocessable_entity) unless payload.is_a?(Hash)
 
-      result = executor_service.call(idempotency_key:, request_payload: payload)
+      repository_capability = Plywo::Executor::RepositoryCapability.from_header(
+        request.headers[Plywo::Executor::RepositoryCapability::HEADER]
+      )
+      result = executor_service.call(
+        idempotency_key:,
+        request_payload: payload,
+        repository_capability:
+      )
       render json: result.to_h, status: :ok
     rescue JSON::ParserError => error
       render_error("Invalid JSON: #{error.message}", status: :bad_request)
