@@ -1,3 +1,4 @@
+require "fileutils"
 require "rbconfig"
 require "tmpdir"
 
@@ -19,54 +20,56 @@ module Plywo
         @start_timeout_seconds = Float(start_timeout_seconds)
         @quiescence_timeout_seconds = Float(quiescence_timeout_seconds)
         @quiet_period_seconds = Float(quiet_period_seconds)
+        @supervisor_pid = nil
+        @worker_pids = []
+        @directory = nil
+        @log_path = nil
       end
 
       def call
-        initial_jobs = correlated_queue_jobs
-        raise "Expected Solid Queue to contain correlated work for execution #{execution_id}" if initial_jobs.empty?
+        start
+        finish
+      ensure
+        stop
+      end
 
-        validate_serialized_context!(initial_jobs)
+      def start
+        return self if started?
 
-        supervisor_pid = nil
-        supervisor_status = nil
-        worker_pids = []
-        quiescence = nil
-        worker_log = nil
+        @directory = Dir.mktmpdir("plywo-solid-queue-execution")
+        @log_path = File.join(@directory, "solid-queue.log")
 
-        Dir.mktmpdir("plywo-solid-queue-execution") do |directory|
-          log_path = File.join(directory, "solid-queue.log")
-
-          File.open(log_path, "w") do |log|
-            supervisor_pid = Process.spawn(
-              worker_environment,
-              RbConfig.ruby,
-              File.join(::Rails.root, "bin/jobs"),
-              "--skip-recurring",
-              chdir: ::Rails.root.to_s,
-              out: log,
-              err: log
-            )
-          end
-
-          begin
-            worker_pids = wait_for_workers
-            quiescence = ExecutionQuiescence.wait(
-              execution_id:,
-              timeout_seconds: quiescence_timeout_seconds,
-              quiet_period_seconds:
-            )
-            Process.kill("TERM", supervisor_pid)
-            _, supervisor_status = Process.wait2(supervisor_pid)
-            supervisor_pid = nil
-          ensure
-            terminate(supervisor_pid) if supervisor_pid
-          end
-
-          worker_log = File.read(log_path)
+        File.open(@log_path, "w") do |log|
+          @supervisor_pid = Process.spawn(
+            worker_environment,
+            RbConfig.ruby,
+            File.join(::Rails.root, "bin/jobs"),
+            "--skip-recurring",
+            chdir: ::Rails.root.to_s,
+            out: log,
+            err: log
+          )
         end
 
-        raise "Solid Queue supervisor exited unsuccessfully:\n#{worker_log}" unless supervisor_status&.success?
+        @worker_pids = wait_for_workers
+        self
+      rescue StandardError
+        stop
+        raise
+      end
 
+      def finish
+        raise "Solid Queue execution has not been started" unless started?
+
+        jobs = correlated_queue_jobs
+        raise "Expected Solid Queue to contain correlated work for execution #{execution_id}" if jobs.empty?
+
+        validate_serialized_context!(jobs)
+        quiescence = ExecutionQuiescence.wait(
+          execution_id:,
+          timeout_seconds: quiescence_timeout_seconds,
+          quiet_period_seconds:
+        )
         jobs = correlated_queue_jobs
         validate_serialized_context!(jobs)
 
@@ -76,14 +79,30 @@ module Plywo
           "transport" => {
             "name" => "solid_queue",
             "worker_pids" => worker_pids,
-            "worker_process_isolated" => worker_pids.none? { |pid| pid == Process.pid }
+            "worker_process_isolated" => worker_pids.none? { |pid| pid == Process.pid },
+            "worker_ready_before_execution" => true
           }
         }
       end
 
+      def stop
+        status = stop_supervisor
+        log = worker_log
+        cleanup_directory
+
+        return unless status && !status.success?
+
+        raise "Solid Queue supervisor exited unsuccessfully:\n#{log}"
+      end
+
+      def started?
+        !@supervisor_pid.nil?
+      end
+
       private
 
-      attr_reader :execution_id, :start_timeout_seconds, :quiescence_timeout_seconds, :quiet_period_seconds
+      attr_reader :execution_id, :start_timeout_seconds, :quiescence_timeout_seconds, :quiet_period_seconds,
+                  :worker_pids
 
       def correlated_work_items
         PlywoExecutionWorkItem.where(execution_id:, kind: "active_job").order(:id)
@@ -149,11 +168,29 @@ module Plywo
         }
       end
 
-      def terminate(pid)
+      def stop_supervisor
+        pid = @supervisor_pid
+        return unless pid
+
+        @supervisor_pid = nil
         Process.kill("TERM", pid)
-        Process.wait(pid)
+        _, status = Process.wait2(pid)
+        status
       rescue Errno::ESRCH, Errno::ECHILD
         nil
+      end
+
+      def worker_log
+        return "" unless @log_path && File.exist?(@log_path)
+
+        File.read(@log_path)
+      end
+
+      def cleanup_directory
+        directory = @directory
+        @directory = nil
+        @log_path = nil
+        FileUtils.remove_entry(directory) if directory && File.exist?(directory)
       end
 
       def monotonic_time
