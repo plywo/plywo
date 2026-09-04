@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_04_173000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_04_183000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -71,5 +71,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_173000) do
     t.string "work_id", null: false
     t.index ["execution_id", "kind", "work_id"], name: "index_plywo_work_items_on_execution_kind_work", unique: true
     t.index ["execution_id", "status"], name: "index_plywo_execution_work_items_on_execution_id_and_status"
+  end
+
+  create_table "plywo_executions", force: :cascade do |t|
+    t.string "baseline_sha", null: false
+    t.string "candidate_sha", null: false
+    t.jsonb "context", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.string "decision"
+    t.string "execution_id", null: false
+    t.text "failure"
+    t.datetime "finished_at"
+    t.jsonb "result", default: {}, null: false
+    t.string "scenario_id", null: false
+    t.string "source", null: false
+    t.datetime "started_at"
+    t.string "status", default: "queued", null: false
+    t.datetime "updated_at", null: false
+    t.index ["execution_id"], name: "index_plywo_executions_on_execution_id", unique: true
+    t.index ["status"], name: "index_plywo_executions_on_status"
   end
 end

@@ -32,12 +32,16 @@ class GithubPullRequestWebhookJob < ApplicationJob
       return
     end
 
+    execution, enqueue = execution_dispatcher.call(delivery:, pull_request:)
+    execution_job_class.perform_later(execution.id) if enqueue
+
     delivery.complete!
     Rails.logger.info(
       "Plywo GitHub App authenticated delivery=#{delivery.delivery_id.inspect} " \
       "repository=#{delivery.repository.inspect} pr=#{delivery.pull_request_number.inspect} " \
       "head_sha=#{delivery.head_sha.inspect} installation_id=#{delivery.installation_id.inspect} " \
-      "token_expires_at=#{token.expires_at.iso8601.inspect} execution=ready"
+      "token_expires_at=#{token.expires_at.iso8601.inspect} execution_id=#{execution.execution_id.inspect} " \
+      "execution=#{enqueue ? "queued" : execution.status}"
     )
   rescue StandardError => error
     delivery&.fail!(error)
@@ -52,5 +56,13 @@ class GithubPullRequestWebhookJob < ApplicationJob
 
   def pull_request_client(token:)
     Plywo::Github::PullRequestClient.new(token:)
+  end
+
+  def execution_dispatcher
+    Plywo::Github::ExecutionDispatcher.new
+  end
+
+  def execution_job_class
+    GithubPullRequestExecutionJob
   end
 end
