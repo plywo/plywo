@@ -12,9 +12,6 @@ module Plywo
       end
 
       def cancel(execution_id:, attempt_number:, reason: "control_plane_cancelled")
-        execution_id
-        attempt_number
-        reason
         true
       end
     end
