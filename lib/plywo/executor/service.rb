@@ -16,6 +16,7 @@ module Plywo
 
       def call(idempotency_key:, request_payload:)
         request = Request.from_h(request_payload)
+        validate_idempotency_key!(idempotency_key:, request:)
         canonical_payload = request.to_h
         acquisition = acquire(idempotency_key:, request_payload: canonical_payload)
 
@@ -32,6 +33,13 @@ module Plywo
       end
 
       private
+
+      def validate_idempotency_key!(idempotency_key:, request:)
+        expected = "#{request.execution_id}:#{request.attempt_number}"
+        return if idempotency_key == expected
+
+        raise ArgumentError, "Idempotency-Key must match the execution id and attempt number"
+      end
 
       def acquire(idempotency_key:, request_payload:)
         @request_model.acquire!(
