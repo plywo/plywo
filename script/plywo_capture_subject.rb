@@ -97,7 +97,7 @@ class PlywoSubjectCapture
     require_solid_queue_execution
     assert_subject_owned!(Plywo::Rails::SolidQueueExecution.instance_method(:start), "SolidQueueExecution")
 
-    Plywo::Rails::SolidQueueExecution.new(
+    execution = Plywo::Rails::SolidQueueExecution.new(
       execution_id:,
       start_timeout_seconds: Float(
         ENV.fetch("PLYWO_SOLID_QUEUE_START_TIMEOUT_SECONDS", DEFAULT_START_TIMEOUT_SECONDS)
@@ -107,6 +107,25 @@ class PlywoSubjectCapture
       ),
       quiet_period_seconds: Float(ENV.fetch("PLYWO_QUIET_PERIOD_SECONDS", DEFAULT_QUIET_PERIOD_SECONDS))
     )
+
+    install_solid_queue_diagnostics(execution)
+    execution
+  end
+
+  def install_solid_queue_diagnostics(execution)
+    return unless ENV["PLYWO_SOLID_QUEUE_DIAGNOSTICS"] == "1"
+    return unless execution.respond_to?(:worker_log, true)
+
+    diagnostics = Module.new do
+      define_method(:stop) do
+        log = send(:worker_log)
+        super()
+      ensure
+        warn "Plywo Solid Queue worker log:\n#{log}" if log && !log.empty?
+      end
+    end
+
+    execution.singleton_class.prepend(diagnostics)
   end
 
   def drive_async_work(execution_id:, async_execution:)
