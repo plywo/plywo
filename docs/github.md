@@ -67,14 +67,16 @@ Current automatic integrations:
 
 ```text
 sql.active_record       -> SQL execution site
-                                           
 enqueue.active_job      -> background-job enqueue site
 enqueue_at.active_job   -> scheduled-job enqueue site
+deliver.action_mailer   -> synchronous email delivery site
 ```
 
-The captured runtime source means "where this observed behavior happened". It is not necessarily the root cause of why a PR changed the behavior. For example, a changed configuration or loop count can create an extra job while the runtime source correctly points to an unchanged `perform_later` line. Future causal analysis may connect runtime sites to changed-code cause candidates, but GitHub annotations must not claim that inference today.
+The captured runtime source means "where this observed behavior happened". It is not necessarily the root cause of why a PR changed the behavior. For example, a changed configuration or loop count can create an extra job or email while the runtime source correctly points to the execution or delivery site. Future causal analysis may connect runtime sites to changed-code cause candidates, but GitHub annotations must not claim that inference today.
 
-Background-job count changes currently produce a medium-severity `SIDE_EFFECT_CHANGED` finding, so their default merge recommendation is `REVIEW` rather than `BLOCK`. A trusted runtime enqueue source can still produce a warning annotation on the neutral Check.
+Background-job count changes currently produce a medium-severity `SIDE_EFFECT_CHANGED` finding, so their default merge recommendation is `REVIEW` rather than `BLOCK`. Email count changes currently produce a high-severity `SIDE_EFFECT_CHANGED` finding and therefore default to `BLOCK`. Both can carry a trusted runtime annotation when the application callsite is unambiguous and part of the changed-file set.
+
+Action Mailer attribution currently covers synchronous `deliver_now` behavior. `deliver_later` first crosses an Active Job boundary, so Plywo must propagate execution context into the job before treating the eventual delivery as evidence from the originating execution.
 
 This instrumentation is intended for Plywo executions such as CI and test environments, not as an always-on production profiler by default.
 

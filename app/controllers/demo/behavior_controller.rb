@@ -23,7 +23,7 @@ module Demo
       end
 
       profile.fetch(:emails).times do
-        Plywo::Rails::Evidence.side_effect(:email, provider: "demo")
+        DemoMailer.notification(Current.plywo_execution_id).deliver_now
       end
 
       sleep(profile.fetch(:delay_ms) / 1000.0)
