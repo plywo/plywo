@@ -1,0 +1,21 @@
+<main style="max-width: 900px; margin: 48px auto; font-family: system-ui, sans-serif; line-height: 1.5;">
+  <h1>Register Plywo GitHub App</h1>
+
+  <p>
+    Environment: <strong><%= @manifest_environment %></strong>.
+    This page resolves the version-controlled manifest using <code>PLYWO_PUBLIC_URL</code>
+    and submits it to the <code>plywo</code> GitHub organization.
+  </p>
+
+  <form action="<%= @registration_url %>" method="post" style="margin: 24px 0;">
+    <input type="hidden" name="manifest" value="<%= JSON.generate(@manifest) %>">
+    <button type="submit" style="font-size: 16px; padding: 10px 16px; cursor: pointer;">
+      Register <%= @manifest.fetch("name") %>
+    </button>
+  </form>
+
+  <h2>Resolved manifest</h2>
+  <pre style="white-space: pre-wrap; background: #f6f8fa; padding: 16px; border-radius: 8px;"><%= JSON.pretty_generate(@manifest) %></pre>
+
+  <p>No credentials are stored by this page. GitHub returns them once after the manifest conversion.</p>
+</main>

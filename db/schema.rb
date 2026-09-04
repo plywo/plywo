@@ -1,0 +1,55 @@
+# This file is auto-generated from the current state of the database. Instead
+# of editing this file, please use the migrations feature of Active Record to
+# incrementally modify your database, and then regenerate this schema definition.
+#
+# This file is the source Rails uses to define your schema when running `bin/rails
+# db:schema:load`. When creating a new database, `bin/rails db:schema:load` tends to
+# be faster and is potentially less error prone than running all of your
+# migrations from scratch. Old migrations may fail to apply correctly if those
+# migrations use external dependencies or application code.
+#
+# It's strongly recommended that you check this file into your version control system.
+
+ActiveRecord::Schema[8.1].define(version: 2026_09_04_103500) do
+  # These are extensions that must be enabled in order to support this database
+  enable_extension "pg_catalog.plpgsql"
+
+  create_table "plywo_evidence_events", force: :cascade do |t|
+    t.string "confidence"
+    t.datetime "created_at", null: false
+    t.integer "end_line"
+    t.string "execution_id", null: false
+    t.datetime "occurred_at", null: false
+    t.string "path"
+    t.jsonb "payload", default: {}, null: false
+    t.string "producer_id"
+    t.string "producer_kind", null: false
+    t.string "producer_name"
+    t.string "run_id"
+    t.string "signal", null: false
+    t.integer "start_line"
+    t.string "subject"
+    t.datetime "updated_at", null: false
+    t.index ["execution_id", "signal"], name: "index_plywo_evidence_events_on_execution_id_and_signal"
+    t.index ["execution_id"], name: "index_plywo_evidence_events_on_execution_id"
+  end
+
+  create_table "plywo_execution_work_items", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "enqueued_at"
+    t.string "error_class"
+    t.string "execution_id", null: false
+    t.datetime "finished_at"
+    t.string "kind", null: false
+    t.string "name"
+    t.string "queue_name"
+    t.string "run_id"
+    t.datetime "started_at"
+    t.string "status", null: false
+    t.string "subject"
+    t.datetime "updated_at", null: false
+    t.string "work_id", null: false
+    t.index ["execution_id", "kind", "work_id"], name: "index_plywo_work_items_on_execution_kind_work", unique: true
+    t.index ["execution_id", "status"], name: "index_plywo_execution_work_items_on_execution_id_and_status"
+  end
+end

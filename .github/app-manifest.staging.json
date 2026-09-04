@@ -1,0 +1,22 @@
+{
+  "name": "Plywo Staging",
+  "description": "Staging GitHub App for Plywo behavioral change validation.",
+  "url": "https://github.com/plywo/plywo",
+  "hook_attributes": {
+    "url": "{{PLYWO_PUBLIC_URL}}/github/webhooks",
+    "active": true
+  },
+  "redirect_url": "{{PLYWO_PUBLIC_URL}}/github/app/manifest/callback",
+  "public": false,
+  "default_permissions": {
+    "checks": "write",
+    "contents": "read",
+    "pull_requests": "write"
+  },
+  "default_events": [
+    "pull_request",
+    "check_run"
+  ],
+  "request_oauth_on_install": false,
+  "setup_on_update": false
+}
