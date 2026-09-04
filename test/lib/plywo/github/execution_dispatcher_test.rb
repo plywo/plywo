@@ -1,7 +1,7 @@
 require "test_helper"
 
 class PlywoGithubExecutionDispatcherTest < ActiveSupport::TestCase
-  test "uses one durable execution for the same comparison identity" do
+  test "reuses one durable execution and safely re-enqueues while it is queued" do
     delivery = create_delivery
     pull_request = pull_request_payload
     dispatcher = Plywo::Github::ExecutionDispatcher.new(scenario_id: "scenario")
@@ -10,10 +10,23 @@ class PlywoGithubExecutionDispatcherTest < ActiveSupport::TestCase
     second, second_enqueue = dispatcher.call(delivery:, pull_request:)
 
     assert first_enqueue
-    refute second_enqueue
+    assert second_enqueue
     assert_equal first.id, second.id
     assert_equal "queued", first.status
     assert_match(/\Agithub-[0-9a-f]{64}\z/, first.execution_id)
+  end
+
+  test "does not re-enqueue a completed execution for the same identity" do
+    delivery = create_delivery
+    dispatcher = Plywo::Github::ExecutionDispatcher.new(scenario_id: "scenario")
+    execution, = dispatcher.call(delivery:, pull_request: pull_request_payload)
+    execution.update!(status: "completed", decision: "allow", finished_at: Time.current)
+
+    existing, enqueue = dispatcher.call(delivery:, pull_request: pull_request_payload)
+
+    refute enqueue
+    assert_equal execution.id, existing.id
+    assert_equal "completed", existing.status
   end
 
   test "requeues a failed execution for the same identity" do
