@@ -27,11 +27,16 @@ module Plywo
         @clock = clock
       end
 
-      def installation_token(installation_id:)
+      def installation_token(installation_id:, repositories: nil, permissions: nil)
+        body = {}
+        body[:repositories] = Array(repositories) if repositories
+        body[:permissions] = permissions if permissions
+
         response = request(
           :post,
           "/app/installations/#{Integer(installation_id)}/access_tokens",
-          authorization: "Bearer #{app_jwt}"
+          authorization: "Bearer #{app_jwt}",
+          body:
         )
 
         Token.new(
