@@ -52,7 +52,7 @@ module Plywo
             start_line: source[:start_line],
             end_line: source[:end_line],
             confidence: source[:confidence],
-            attributes: payload[:attributes] || {},
+            payload: payload[:attributes] || {},
             producer_kind:,
             producer_name:,
             producer_id:,
@@ -73,7 +73,7 @@ module Plywo
             start_line: nil,
             end_line: nil,
             confidence: nil,
-            attributes: { "error_class" => error.class.name },
+            payload: { "error_class" => error.class.name },
             producer_kind:,
             producer_name:,
             producer_id:,
@@ -83,7 +83,7 @@ module Plywo
         end
 
         def event_row(execution_id:, run_id:, subject:, signal:, path:, start_line:, end_line:, confidence:,
-                      attributes:, producer_kind:, producer_name:, producer_id:, occurred_at:, now:)
+                      payload:, producer_kind:, producer_name:, producer_id:, occurred_at:, now:)
           {
             execution_id: execution_id.to_s,
             run_id: run_id&.to_s,
@@ -93,7 +93,7 @@ module Plywo
             start_line:,
             end_line:,
             confidence: confidence&.to_s,
-            attributes:,
+            payload:,
             producer_kind: producer_kind.to_s,
             producer_name: producer_name.to_s,
             producer_id: producer_id&.to_s,
