@@ -2,6 +2,7 @@ class PlywoExecution < ApplicationRecord
   ACTIVE_STATUSES = %w[queued running finalizing].freeze
   CANCELLABLE_STATUSES = %w[queued running].freeze
   LEASED_STATUSES = %w[running finalizing].freeze
+  IGNORABLE_STATUSES = (ACTIVE_STATUSES + [ "failed" ]).freeze
   TERMINAL_STATUSES = %w[completed ignored failed cancelled].freeze
   STATUSES = (ACTIVE_STATUSES + TERMINAL_STATUSES).freeze
   OUTCOMES = %w[allow review block infra_failure stale manual_review_required cancelled].freeze
@@ -121,7 +122,7 @@ class PlywoExecution < ApplicationRecord
   def ignore!(reason, now: Time.current)
     reason = reason.to_s
     outcome = reason.start_with?("stale") ? "stale" : "manual_review_required"
-    ignored = self.class.where(id:, status: ACTIVE_STATUSES).update_all(
+    ignored = self.class.where(id:, status: IGNORABLE_STATUSES).update_all(
       status: "ignored",
       outcome:,
       failure: reason,
