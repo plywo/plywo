@@ -106,6 +106,26 @@ class GithubPullRequestExecutionFinalizeJobTest < ActiveJob::TestCase
     assert_equal 1, execution.attempt_count
   end
 
+  test "ignores a late result after cancellation without publishing regression or infrastructure failure" do
+    execution = running_execution
+    publisher = counting_publisher
+    execution.cancel!(attempt_number: execution.attempt_count, reason: "user_cancelled")
+
+    job = TestJob.new
+    job.authentication_override = fake_authentication
+    job.client_override = sequence_client([])
+    job.publisher_override = publisher
+    job.perform(execution.execution_id, Plywo::Executor::Result.success(payload).to_h)
+
+    execution.reload
+    assert_equal "cancelled", execution.status
+    assert_equal "cancelled", execution.outcome
+    assert_equal "user_cancelled", execution.cancellation_reason
+    assert_equal({}, execution.result)
+    assert_equal 0, publisher.calls
+    assert_equal 0, publisher.infra_calls
+  end
+
   private
 
   def perform_job(execution:, result:, client:, publisher:)
