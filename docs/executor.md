@@ -74,7 +74,7 @@ GithubPullRequestExecutionJob
        -> GitHub publication
 ```
 
-The executor job does not receive a GitHub App token or private key.
+The executor job does not receive a GitHub App private key. Remote execution can receive a separate short-lived repository capability described below.
 
 ## Execution leases
 
@@ -127,9 +127,12 @@ Content-Type: application/json
 Accept: application/json
 Authorization: Bearer <executor service token>
 Idempotency-Key: <execution_id>:<attempt_number>
+Plywo-Repository-Authorization: Bearer <short-lived repository capability>  # when available
 ```
 
-The bearer token authenticates the control plane to the executor service. It is not a GitHub token and is never added to the stable request body. The idempotency key gives a remote service a stable identity for duplicate transport submissions of the same attempt.
+The normal `Authorization` bearer authenticates the control plane to the executor service. It is not a GitHub token and is never added to the stable request body. The idempotency key gives a remote service a stable identity for duplicate transport submissions of the same attempt.
+
+For a durable GitHub execution, the control plane can mint a second short-lived capability from the recorded installation. The token request is narrowed to the one repository and to `contents: read`. The resulting token is sent only in `Plywo-Repository-Authorization`; it is not added to `Request.to_h` or `Result.to_h`.
 
 A non-2xx response, invalid JSON, or invalid result schema becomes a transport `INFRA_FAILURE`; a valid failed `Result` preserves the remote worker's original error class and message through finalization.
 
@@ -155,17 +158,21 @@ PLYWO_EXECUTOR_SERVICE_TOKEN=...
 
 The control-plane `PLYWO_REMOTE_EXECUTOR_TOKEN` and the service-side `PLYWO_EXECUTOR_SERVICE_TOKEN` are the two ends of the same service-authentication credential. They are separate from GitHub App credentials.
 
-The initial worker implementation is selected independently with:
+Worker implementation is selected independently:
 
 ```text
 PLYWO_EXECUTOR_SERVICE_ADAPTER=local
+# or
+PLYWO_EXECUTOR_SERVICE_ADAPTER=git_clone
 ```
 
-This separation is intentional. A service deployment must not set `PLYWO_EXECUTOR=remote` and recursively call itself, and it must not receive the GitHub App private key, webhook secret, or installation tokens.
+`local` reuses an already-present checkout. `git_clone` requires the ephemeral repository capability and prepares a disposable Git workspace before invoking the same exact-worktree execution path.
+
+This separation is intentional. A service deployment must not set `PLYWO_EXECUTOR=remote` and recursively call itself. It must not receive the GitHub App private key or webhook secret. The only GitHub credential it may receive is the per-execution, repository-scoped, contents-read clone capability.
 
 ### Durable transport idempotency
 
-Every executor service request is stored in `plywo_executor_requests`, keyed uniquely by the HTTP `Idempotency-Key`. The ledger stores only the portable request, its digest, the portable result, and service-side claim metadata. It does not store the bearer token.
+Every executor service request is stored in `plywo_executor_requests`, keyed uniquely by the HTTP `Idempotency-Key`. The ledger stores only the portable request, its digest, the portable result, and service-side claim metadata. It does not store either bearer token or the repository capability.
 
 For the same idempotency key:
 
@@ -185,11 +192,21 @@ PLYWO_EXECUTOR_SERVICE_REQUEST_LEASE_SECONDS=2400
 
 This lease protects transport idempotency. It is separate from the control-plane `PlywoExecution` lease, which protects the product execution lifecycle.
 
-### Current execution scope
+### Repository clone capability
 
-The first service role intentionally reuses `LocalPullRequestRunner`. That means it is currently suitable for Plywo dogfood and for deployments where the executor has the relevant repository checkout and commits available locally. It does not yet solve private repository checkout for arbitrary customer repositories.
+`Plywo::Github::RepositoryCapabilityProvider` loads the durable execution by `execution_id`, reads the installation ID only inside the control-plane trust boundary, and asks GitHub for a narrowed installation access token:
 
-A later clone-capability slice should provide a short-lived repository capability to the executor without putting GitHub installation credentials into the stable `Request` schema.
+```text
+repository: exact request repository
+permissions:
+  contents: read
+```
+
+The token is deliberately out-of-band from request serialization. The executor controller parses it into `Plywo::Executor::RepositoryCapability` and passes it to the selected worker adapter without adding it to `plywo_executor_requests`.
+
+`GitCloneAdapter` currently supports same-repository pull requests. It initializes a disposable repository, configures the normal GitHub HTTPS remote, and fetches the recorded base branch plus the PR head ref. Authentication is supplied to Git through process environment Git config, not embedded in the clone URL or Git command arguments. The workspace is removed after the attempt.
+
+The adapter still reuses `LocalPullRequestRunner`, so arbitrary customer repositories must expose the execution/instrumentation surface expected by the current capture runtime. Generalized instrumentation packaging is a separate boundary from repository authorization.
 
 ## Trust boundary
 
@@ -202,23 +219,26 @@ The executor can report observations and execution failures. It does not decide 
 - `INFRA_FAILURE` versus product regression
 - retry eligibility and attempt counting
 - GitHub publication
+- minting the short-lived repository capability
 
 The executor service role owns only:
 
 - authenticating the control-plane service credential
+- consuming the short-lived clone capability for repository access
 - durable idempotency for one execution attempt
 - acquiring a service-side worker claim
 - producing `Plywo::Executor::Result`
 
-This keeps the executor replaceable: local process, container, VM, Kubernetes job, or another disposable worker can implement the same boundary.
+This keeps an executor replaceable: local process, container, VM, Kubernetes job, or another disposable worker can implement the same boundary.
 
 ## Remaining remote-runtime boundaries
 
-The HTTP service is now represented in code, but production remote execution is not complete. The important remaining boundaries are:
+Repository authorization now has an explicit out-of-band capability boundary, but production remote execution is not complete. The important remaining boundaries are:
 
-1. private-repository checkout through a short-lived clone capability rather than GitHub App credentials in the request contract
-2. heartbeat/cancellation for long-running remote work so useful work can renew the control-plane lease without database access
-3. deployment isolation proving the executor role actually runs without GitHub App secrets
-4. a real control-plane -> executor-service E2E on separate processes/hosts
+1. heartbeat/cancellation for long-running remote work so useful work can renew the control-plane lease without database access
+2. generalized subject instrumentation so an arbitrary customer repository does not need Plywo's dogfood files committed into it
+3. fork pull requests, which require an explicit multi-repository capability model rather than reusing the base-repository capability
+4. deployment isolation proving the executor role actually runs without the GitHub App private key or webhook secret
+5. a real control-plane -> executor-service E2E on separate processes/hosts using the `git_clone` adapter
 
-The live Development App infra-failure Re-run proof remains tracked independently in #35.
+The live Development App infra-failure Re-run proof was completed in #35.
