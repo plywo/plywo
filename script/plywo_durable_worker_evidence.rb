@@ -34,7 +34,7 @@ raise "Plywo execution context leaked after origin lifecycle" if Current.plywo_e
 ActiveJob::Base.deserialize(serialized_job).perform_now
 
 records = PlywoEvidenceEvent.where(execution_id:).order(:id).to_a
-runtime_signals = %w[worker_wall_ms worker_process_cpu_ms worker_thread_cpu_ms]
+runtime_signals = %w[queue_wait_ms worker_wall_ms worker_process_cpu_ms worker_thread_cpu_ms]
 product_records = records.reject { |record| runtime_signals.include?(record.signal) }
 runtime_records = records.select { |record| runtime_signals.include?(record.signal) }
 expected_product_signals = %w[sql_queries emails http_requests]
@@ -49,6 +49,7 @@ raise "Expected propagated run id" unless records.all? { |record| record.run_id 
 raise "Expected propagated subject" unless records.all? { |record| record.subject == "durable-worker-proof" }
 raise "Expected application source attribution" unless product_records.all? { |record| record.path == "script/plywo_durable_worker_evidence.rb" }
 raise "Expected numeric worker runtime values" unless runtime_records.all? { |record| record.payload.fetch("value").is_a?(Numeric) }
+raise "Expected enqueue-to-start semantics" unless runtime_records.first.payload.fetch("semantics") == "enqueue_to_start"
 
 payload = {
   execution_id:,
