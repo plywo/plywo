@@ -2,8 +2,6 @@ module Plywo
   module Rails
     class EvidenceCollector
       IGNORED_SQL_NAMES = %w[SCHEMA TRANSACTION CACHE].freeze
-      SOURCE_EXCLUDED_PREFIXES = %w[.bundle/ log/ storage/ tmp/ vendor/].freeze
-      SOURCE_EXCLUDED_PATHS = [ "lib/plywo/rails/evidence_collector.rb" ].freeze
 
       attr_reader :attributions
 
@@ -58,7 +56,10 @@ module Plywo
       end
 
       def record_job
-        @measurements["background_jobs"] += 1 if current_execution?
+        return unless current_execution?
+
+        @measurements["background_jobs"] += 1
+        record_runtime_attribution("background_jobs")
       end
 
       def record_request(payload)
@@ -87,7 +88,7 @@ module Plywo
       end
 
       def record_runtime_attribution(signal)
-        source = project_callsite
+        source = SourceLocator.call
         return unless source
 
         append_attribution(signal, **source, confidence: "runtime")
@@ -101,27 +102,6 @@ module Plywo
           "confidence" => confidence
         }
         @attributions[signal] << location unless @attributions[signal].include?(location)
-      end
-
-      def project_callsite
-        root = "#{::Rails.root.expand_path}/"
-
-        caller_locations(2, 100).each do |location|
-          absolute_path = location.absolute_path || location.path
-          next unless absolute_path&.start_with?(root)
-
-          path = absolute_path.delete_prefix(root)
-          next if SOURCE_EXCLUDED_PATHS.include?(path)
-          next if SOURCE_EXCLUDED_PREFIXES.any? { |prefix| path.start_with?(prefix) }
-
-          return {
-            path:,
-            start_line: location.lineno,
-            end_line: location.lineno
-          }
-        end
-
-        nil
       end
 
       def current_execution?
