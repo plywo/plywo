@@ -21,6 +21,9 @@ class PlywoSubjectCapture
     reset_test_queue
 
     execution_id = SecureRandom.uuid
+    async_execution = prepare_async_execution(execution_id:)
+    async_execution&.start
+
     response = nil
     collector = Plywo::Rails::EvidenceCollector.new(execution_id:)
     measurements = collector.capture do
@@ -30,7 +33,7 @@ class PlywoSubjectCapture
     measurements["errors"] += 1 unless passed
 
     Current.reset
-    async_result = drive_async_work(execution_id:)
+    async_result = drive_async_work(execution_id:, async_execution:)
     application_job_executions = async_result.fetch("executions")
     quiescence = async_result.fetch("quiescence")
 
@@ -74,6 +77,7 @@ class PlywoSubjectCapture
     puts JSON.pretty_generate(payload)
   ensure
     Current.reset
+    async_execution&.stop
     reset_test_queue
   end
 
@@ -84,16 +88,22 @@ class PlywoSubjectCapture
     request.post(path, headers(execution_id: "warmup", subject: "warmup"))
   end
 
-  def drive_async_work(execution_id:)
-    if async_transport == "solid_queue"
-      require_solid_queue_execution
-      Plywo::Rails::SolidQueueExecution.call(
-        execution_id:,
-        quiescence_timeout_seconds: Float(
-          ENV.fetch("PLYWO_QUIESCENCE_TIMEOUT_SECONDS", DEFAULT_QUIESCENCE_TIMEOUT_SECONDS)
-        ),
-        quiet_period_seconds: Float(ENV.fetch("PLYWO_QUIET_PERIOD_SECONDS", DEFAULT_QUIET_PERIOD_SECONDS))
-      )
+  def prepare_async_execution(execution_id:)
+    return unless async_transport == "solid_queue"
+
+    require_solid_queue_execution
+    Plywo::Rails::SolidQueueExecution.new(
+      execution_id:,
+      quiescence_timeout_seconds: Float(
+        ENV.fetch("PLYWO_QUIESCENCE_TIMEOUT_SECONDS", DEFAULT_QUIESCENCE_TIMEOUT_SECONDS)
+      ),
+      quiet_period_seconds: Float(ENV.fetch("PLYWO_QUIET_PERIOD_SECONDS", DEFAULT_QUIET_PERIOD_SECONDS))
+    )
+  end
+
+  def drive_async_work(execution_id:, async_execution:)
+    if async_execution
+      async_execution.finish
     else
       require_test_queue_execution
       executions = Plywo::Rails::TestQueueExecution.drain(execution_id:)
@@ -112,8 +122,6 @@ class PlywoSubjectCapture
   end
 
   def require_solid_queue_execution
-    return if defined?(Plywo::Rails::SolidQueueExecution)
-
     require File.expand_path("../lib/plywo/rails/solid_queue_execution", __dir__)
   end
 
