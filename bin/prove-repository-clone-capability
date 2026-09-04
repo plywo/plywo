@@ -1,0 +1,58 @@
+#!/usr/bin/env ruby
+
+ENV["RAILS_ENV"] ||= "development"
+
+require "securerandom"
+require_relative "../config/environment"
+
+candidate_sha = ARGV.fetch(0) { `git rev-parse HEAD`.strip }
+template = PlywoExecution
+  .where(source: "github_pull_request", candidate_sha:)
+  .order(:id)
+  .last
+
+abort "No GitHub App execution found for candidate #{candidate_sha}" unless template
+abort "GitHub installation context is missing" unless template.context["installation_id"]
+
+execution = PlywoExecution.create!(
+  execution_id: "clone-proof-#{SecureRandom.hex(16)}",
+  source: "repository_clone_proof",
+  scenario_id: template.scenario_id,
+  baseline_sha: template.baseline_sha,
+  candidate_sha: template.candidate_sha,
+  status: "queued",
+  context: template.context.deep_dup
+)
+
+abort "Could not claim proof execution" unless execution.claim!
+
+request = Plywo::Executor::Request.from_execution(execution)
+capability = Plywo::Github::RepositoryCapabilityProvider.new(root: Rails.root).call(request:)
+abort "Repository capability was not minted" unless capability
+
+result = Plywo::Executor::GitCloneAdapter.new(root: Rails.root).call(
+  request:,
+  repository_capability: capability
+)
+
+if result.success?
+  execution.complete!(result.payload)
+else
+  execution.fail_details!(
+    error_class: result.error_class,
+    error_message: result.error_message
+  )
+end
+
+puts "Repository clone capability proof"
+puts "execution_id=#{execution.execution_id}"
+puts "candidate_sha=#{candidate_sha}"
+puts "capability=#{capability.inspect}"
+puts "result_status=#{result.status}"
+puts "durable_status=#{execution.reload.status}"
+puts "outcome=#{execution.outcome.inspect}"
+puts "decision=#{execution.decision.inspect}"
+puts "error_class=#{result.error_class.inspect}"
+puts "error_message=#{result.error_message.inspect}"
+
+exit(result.success? ? 0 : 1)

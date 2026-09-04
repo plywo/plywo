@@ -18,15 +18,17 @@ module Plywo
         end
       end
 
-      def initialize(root: Rails.root, command_runner: CommandRunner.new)
+      def initialize(root: Rails.root, tool_root: root, command_runner: CommandRunner.new, fetch_repository: true)
         @root = Pathname(root).expand_path
+        @tool_root = Pathname(tool_root).expand_path
         @command_runner = command_runner
+        @fetch_repository = fetch_repository
       end
 
       def call(execution:)
         context = execution.context
         assert_local_subject!(context:)
-        fetch_repository!
+        fetch_repository! if @fetch_repository
         assert_commit!(execution.baseline_sha)
         assert_commit!(execution.candidate_sha)
 
@@ -130,7 +132,7 @@ module Plywo
 
         run!(
           env:,
-          command: [ RbConfig.ruby, @root.join("script", "plywo_capture_subject.rb").to_s ],
+          command: [ RbConfig.ruby, @tool_root.join("script", "plywo_capture_subject.rb").to_s ],
           chdir: root
         )
       end

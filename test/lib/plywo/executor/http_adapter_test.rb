@@ -24,6 +24,29 @@ class PlywoExecutorHttpAdapterTest < ActiveSupport::TestCase
     assert_equal payload, result.payload
   end
 
+  test "sends a repository capability only as an HTTP header" do
+    transport = recording_transport(
+      status: 200,
+      body: JSON.generate(Plywo::Executor::Result.success(payload).to_h)
+    )
+    provider = Object.new
+    provider.define_singleton_method(:call) do |request:|
+      raise "unexpected request" unless request.execution_id == "github-123"
+
+      Plywo::Executor::RepositoryCapability.new(token: "clone-token")
+    end
+
+    adapter(transport:, repository_capability_provider: provider).call(request: executor_request)
+
+    call = transport.calls.fetch(0)
+    assert_equal(
+      "Bearer clone-token",
+      call.fetch(:headers).fetch(Plywo::Executor::RepositoryCapability::HEADER)
+    )
+    refute_includes call.fetch(:body), "clone-token"
+    assert_equal executor_request.to_h, JSON.parse(call.fetch(:body))
+  end
+
   test "preserves a remote worker failure result" do
     remote_failure = Plywo::Executor::Result.new(
       schema_version: "1",
@@ -83,13 +106,14 @@ class PlywoExecutorHttpAdapterTest < ActiveSupport::TestCase
 
   private
 
-  def adapter(transport:)
+  def adapter(transport:, repository_capability_provider: nil)
     Plywo::Executor::HttpAdapter.new(
       url: "https://executor.example.test/v1/executions",
       token: "remote-secret",
       open_timeout: 3,
       read_timeout: 120,
-      transport:
+      transport:,
+      repository_capability_provider:
     )
   end
 
