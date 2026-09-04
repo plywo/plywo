@@ -36,21 +36,24 @@ module Plywo
         token:,
         open_timeout: DEFAULT_OPEN_TIMEOUT_SECONDS,
         read_timeout: DEFAULT_READ_TIMEOUT_SECONDS,
-        transport: NetHttpTransport.new
+        transport: NetHttpTransport.new,
+        repository_capability_provider: nil
       )
         @uri = URI.parse(url)
         @token = token.to_s
         @open_timeout = Integer(open_timeout)
         @read_timeout = Integer(read_timeout)
         @transport = transport
+        @repository_capability_provider = repository_capability_provider
 
         validate_configuration!
       end
 
       def call(request:)
+        repository_capability = @repository_capability_provider&.call(request:)
         response = @transport.call(
           uri: @uri,
-          headers: headers(request:),
+          headers: headers(request:, repository_capability:),
           body: JSON.generate(request.to_h),
           open_timeout: @open_timeout,
           read_timeout: @read_timeout
@@ -80,13 +83,17 @@ module Plywo
         raise Error, "Remote executor read timeout must be positive" unless @read_timeout.positive?
       end
 
-      def headers(request:)
-        {
+      def headers(request:, repository_capability:)
+        headers = {
           "Accept" => "application/json",
           "Authorization" => "Bearer #{@token}",
           "Content-Type" => "application/json",
           "Idempotency-Key" => "#{request.execution_id}:#{request.attempt_number}"
         }
+        if repository_capability
+          headers[RepositoryCapability::HEADER] = repository_capability.authorization_header
+        end
+        headers
       end
     end
   end
