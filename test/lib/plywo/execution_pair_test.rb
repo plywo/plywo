@@ -15,7 +15,39 @@ class PlywoExecutionPairTest < ActiveSupport::TestCase
     assert_equal "block", payload.dig("result", "merge_recommendation")
   end
 
-  test "attaches an explicit source only when the path changed" do
+  test "attaches trusted explicit or runtime sources only when the path changed" do
+    %w[explicit runtime].each do |confidence|
+      baseline = execution(id: "main", sql_queries: 14)
+      candidate = execution(id: "candidate", sql_queries: 19).merge(
+        "attributions" => {
+          "sql_queries" => [
+            {
+              "path" => "app/controllers/demo/behavior_controller.rb",
+              "start_line" => 20,
+              "end_line" => 20,
+              "confidence" => confidence
+            }
+          ]
+        }
+      )
+
+      trusted = Plywo::ExecutionPair.call(
+        baseline:,
+        candidate:,
+        changed_paths: [ "app/controllers/demo/behavior_controller.rb" ]
+      )
+      untrusted = Plywo::ExecutionPair.call(
+        baseline:,
+        candidate:,
+        changed_paths: [ "README.md" ]
+      )
+
+      assert_equal confidence, trusted.dig("result", "findings", 0, "source", "confidence")
+      assert_nil untrusted.dig("result", "findings", 0, "source")
+    end
+  end
+
+  test "rejects inferred source confidence" do
     baseline = execution(id: "main", sql_queries: 14)
     candidate = execution(id: "candidate", sql_queries: 19).merge(
       "attributions" => {
@@ -24,25 +56,19 @@ class PlywoExecutionPairTest < ActiveSupport::TestCase
             "path" => "app/controllers/demo/behavior_controller.rb",
             "start_line" => 20,
             "end_line" => 20,
-            "confidence" => "explicit"
+            "confidence" => "inferred"
           }
         ]
       }
     )
 
-    trusted = Plywo::ExecutionPair.call(
+    payload = Plywo::ExecutionPair.call(
       baseline:,
       candidate:,
       changed_paths: [ "app/controllers/demo/behavior_controller.rb" ]
     )
-    untrusted = Plywo::ExecutionPair.call(
-      baseline:,
-      candidate:,
-      changed_paths: [ "README.md" ]
-    )
 
-    assert_equal "app/controllers/demo/behavior_controller.rb", trusted.dig("result", "findings", 0, "source", "path")
-    assert_nil untrusted.dig("result", "findings", 0, "source")
+    assert_nil payload.dig("result", "findings", 0, "source")
   end
 
   test "rejects executions from different scenarios" do
