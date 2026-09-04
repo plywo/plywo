@@ -1,5 +1,5 @@
 class GithubPullRequestExecutionHeartbeatJob < ApplicationJob
-  queue_as :default
+  queue_as :control
 
   def self.schedule(execution_id, attempt_number)
     set(wait: interval_seconds.seconds).perform_later(execution_id, attempt_number)
