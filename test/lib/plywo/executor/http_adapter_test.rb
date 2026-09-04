@@ -60,6 +60,16 @@ class PlywoExecutorHttpAdapterTest < ActiveSupport::TestCase
     assert_match(/Remote executor returned invalid JSON/, error.message)
   end
 
+  test "fails when the result is not a JSON object" do
+    transport = recording_transport(status: 200, body: JSON.generate([]))
+
+    error = assert_raises(Plywo::Executor::HttpAdapter::Error) do
+      adapter(transport:).call(request: executor_request)
+    end
+
+    assert_equal "Remote executor result must be a JSON object", error.message
+  end
+
   test "rejects insecure or incomplete configuration" do
     assert_raises(Plywo::Executor::HttpAdapter::Error) do
       Plywo::Executor::HttpAdapter.new(url: "file:///tmp/executor", token: "secret")
