@@ -19,6 +19,14 @@ class GithubPullRequestExecutionFinalizeJob < ApplicationJob
       return
     end
 
+    unless execution.begin_finalization!(attempt_number: execution.attempt_count)
+      Rails.logger.info(
+        "Plywo GitHub executor result ignored execution_id=#{execution.execution_id.inspect} " \
+        "reason=cancelled_or_superseded_before_publish"
+      )
+      return
+    end
+
     if result.failure?
       finalize_infra_failure(execution:, result:, token:)
       return
@@ -26,8 +34,7 @@ class GithubPullRequestExecutionFinalizeJob < ApplicationJob
 
     finalize_success(execution:, payload: result.payload, token:)
   rescue StandardError => error
-    if execution&.status == "running"
-      execution.fail!(error)
+    if execution&.fail!(error)
       publish_infra_failure(execution:, error:)
     end
     raise
@@ -42,7 +49,8 @@ class GithubPullRequestExecutionFinalizeJob < ApplicationJob
       return
     end
 
-    execution.complete!(payload)
+    return unless execution.complete!(payload)
+
     Rails.logger.info(
       "Plywo GitHub execution finalized execution_id=#{execution.execution_id.inspect} " \
       "decision=#{execution.decision.inspect} outcome=#{execution.outcome.inspect} " \
@@ -52,7 +60,8 @@ class GithubPullRequestExecutionFinalizeJob < ApplicationJob
   end
 
   def finalize_infra_failure(execution:, result:, token:)
-    execution.fail_details!(error_class: result.error_class, error_message: result.error_message)
+    return unless execution.fail_details!(error_class: result.error_class, error_message: result.error_message)
+
     publication = execution_publisher(token: token.value).infra_failure(
       execution:,
       error_class: result.error_class
