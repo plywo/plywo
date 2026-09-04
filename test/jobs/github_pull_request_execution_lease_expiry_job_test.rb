@@ -43,6 +43,25 @@ class GithubPullRequestExecutionLeaseExpiryJobTest < ActiveJob::TestCase
     assert_equal [ "Plywo::Executor::LeaseExpired" ], publisher.failure_classes
   end
 
+  test "expires an overdue finalizing execution" do
+    now = Time.utc(2026, 9, 4, 20, 10, 0)
+    execution = running_execution(now: now - 120, lease_seconds: 60)
+    execution.update!(status: "finalizing")
+    publisher = counting_publisher
+
+    perform_job(
+      execution:,
+      expired_at: now,
+      client: current_client,
+      publisher:
+    )
+
+    execution.reload
+    assert_equal "failed", execution.status
+    assert_equal "infra_failure", execution.outcome
+    assert_equal [ "Plywo::Executor::LeaseExpired" ], publisher.failure_classes
+  end
+
   test "does nothing when the lease was renewed before expiry finalization" do
     now = Time.utc(2026, 9, 4, 20, 10, 0)
     execution = running_execution(now: now - 120, lease_seconds: 60)
