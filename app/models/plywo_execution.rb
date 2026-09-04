@@ -1,8 +1,8 @@
 class PlywoExecution < ApplicationRecord
   ACTIVE_STATUSES = %w[queued running].freeze
-  TERMINAL_STATUSES = %w[completed ignored failed].freeze
+  TERMINAL_STATUSES = %w[completed ignored failed cancelled].freeze
   STATUSES = (ACTIVE_STATUSES + TERMINAL_STATUSES).freeze
-  OUTCOMES = %w[allow review block infra_failure stale manual_review_required].freeze
+  OUTCOMES = %w[allow review block infra_failure stale manual_review_required cancelled].freeze
   DEFAULT_LEASE_SECONDS = 30.minutes.to_i
 
   validates :execution_id, :source, :scenario_id, :baseline_sha, :candidate_sha, :status, presence: true
@@ -23,6 +23,8 @@ class PlywoExecution < ApplicationRecord
       finished_at: nil,
       failure: nil,
       outcome: nil,
+      cancellation_reason: nil,
+      cancelled_at: nil,
       attempt_count: attempt_count + 1,
       updated_at: now
     )
@@ -64,6 +66,27 @@ class PlywoExecution < ApplicationRecord
 
     reload if expired == 1
     expired == 1
+  end
+
+  def cancel!(attempt_number: nil, reason: "cancelled", now: Time.current)
+    scope = self.class.where(id:, status: ACTIVE_STATUSES)
+    scope = scope.where(attempt_count: Integer(attempt_number)) unless attempt_number.nil?
+
+    cancelled = scope.update_all(
+      status: "cancelled",
+      outcome: "cancelled",
+      decision: nil,
+      result: {},
+      failure: nil,
+      cancellation_reason: reason.to_s,
+      cancelled_at: now,
+      lease_expires_at: nil,
+      finished_at: now,
+      updated_at: now
+    )
+
+    reload if cancelled == 1
+    cancelled == 1
   end
 
   def complete!(payload)
@@ -117,6 +140,8 @@ class PlywoExecution < ApplicationRecord
       decision: nil,
       result: {},
       failure: nil,
+      cancellation_reason: nil,
+      cancelled_at: nil,
       started_at: nil,
       heartbeat_at: nil,
       lease_expires_at: nil,
