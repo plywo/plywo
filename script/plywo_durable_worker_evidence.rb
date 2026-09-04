@@ -5,6 +5,14 @@ require "securerandom"
 
 require File.join(Dir.pwd, "config/environment")
 
+class PlywoDurableWorkerProbeJob < ApplicationJob
+  def perform
+    ApplicationRecord.connection.select_value("SELECT 1")
+    DemoMailer.notification(Current.plywo_execution_id).deliver_now
+    Net::HTTP.get(URI.parse(Plywo::Demo::LoopbackHttpServer.url))
+  end
+end
+
 execution_id = SecureRandom.uuid
 run_id = "durable-worker-#{SecureRandom.hex(4)}"
 serialized_job = nil
@@ -16,7 +24,7 @@ origin_measurements = origin_collector.capture do
     plywo_run_id: run_id,
     plywo_subject: "durable-worker-proof"
   ) do
-    serialized_job = DemoAsyncEvidenceJob.new.serialize
+    serialized_job = PlywoDurableWorkerProbeJob.new.serialize
   end
 end
 
@@ -31,10 +39,10 @@ expected_signals = %w[sql_queries emails http_requests]
 
 raise "Expected #{expected_signals.inspect}, got #{signals.inspect}" unless signals == expected_signals
 raise "Expected one producer kind" unless records.all? { |record| record.producer_kind == "active_job" }
-raise "Expected DemoAsyncEvidenceJob producer" unless records.all? { |record| record.producer_name == "DemoAsyncEvidenceJob" }
+raise "Expected probe job producer" unless records.all? { |record| record.producer_name == "PlywoDurableWorkerProbeJob" }
 raise "Expected propagated run id" unless records.all? { |record| record.run_id == run_id }
 raise "Expected propagated subject" unless records.all? { |record| record.subject == "durable-worker-proof" }
-raise "Expected application source attribution" unless records.all? { |record| record.path == "app/jobs/demo_async_evidence_job.rb" }
+raise "Expected application source attribution" unless records.all? { |record| record.path == "script/plywo_durable_worker_evidence.rb" }
 
 payload = {
   execution_id:,
