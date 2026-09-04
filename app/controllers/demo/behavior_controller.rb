@@ -3,10 +3,10 @@ module Demo
     skip_forgery_protection
 
     PROFILES = {
-      "warmup" => { sql_queries: 0, background_jobs: 0, emails: 0, delay_ms: 0 },
-      "baseline" => { sql_queries: 14, background_jobs: 1, emails: 1, delay_ms: 15 },
-      "candidate" => { sql_queries: 47, background_jobs: 3, emails: 2, delay_ms: 90 },
-      "git-comparison" => { sql_queries: 14, background_jobs: 1, emails: 1, delay_ms: 15 }
+      "warmup" => { sql_queries: 0, background_jobs: 0, emails: 0, http_requests: 0, delay_ms: 0 },
+      "baseline" => { sql_queries: 14, background_jobs: 1, emails: 1, http_requests: 1, delay_ms: 15 },
+      "candidate" => { sql_queries: 47, background_jobs: 3, emails: 2, http_requests: 1, delay_ms: 90 },
+      "git-comparison" => { sql_queries: 14, background_jobs: 1, emails: 1, http_requests: 1, delay_ms: 15 }
     }.freeze
 
     def create
@@ -24,6 +24,10 @@ module Demo
 
       profile.fetch(:emails).times do
         DemoMailer.notification(Current.plywo_execution_id).deliver_now
+      end
+
+      profile.fetch(:http_requests).times do
+        Net::HTTP.get(URI.parse(Plywo::Demo::LoopbackHttpServer.url))
       end
 
       sleep(profile.fetch(:delay_ms) / 1000.0)
