@@ -17,8 +17,12 @@ namespace :plywo do
 
   desc "Compose two captured executions into one behavioral comparison payload"
   task compare_executions: :environment do
-    baseline = JSON.parse(File.read(ENV.fetch("PLYWO_BASELINE_INPUT")))
-    candidate = JSON.parse(File.read(ENV.fetch("PLYWO_CANDIDATE_INPUT")))
+    baseline = Plywo::ExecutionReducer.call(
+      execution: JSON.parse(File.read(ENV.fetch("PLYWO_BASELINE_INPUT")))
+    )
+    candidate = Plywo::ExecutionReducer.call(
+      execution: JSON.parse(File.read(ENV.fetch("PLYWO_CANDIDATE_INPUT")))
+    )
     changed_paths = if ENV["PLYWO_CHANGED_PATHS"] && File.exist?(ENV["PLYWO_CHANGED_PATHS"])
       File.readlines(ENV.fetch("PLYWO_CHANGED_PATHS"), chomp: true).reject(&:empty?)
     else
