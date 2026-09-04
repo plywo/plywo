@@ -45,12 +45,30 @@ class PlywoGithubCommentRendererTest < ActiveSupport::TestCase
     assert_includes markdown, "Evidence: exact Git worktrees + isolated PostgreSQL databases"
   end
 
+  test "explains which async stage caused a regression" do
+    markdown = Plywo::Github::CommentRenderer.markdown(payload: async_regression_payload)
+
+    assert_includes markdown, "Enqueue → worker start (max job)"
+    assert_includes markdown, "enqueue-to-start dominates"
+    assert_includes markdown, "Async change attribution"
+    assert_includes markdown, "Regression source: enqueue-to-start stage"
+    assert_includes markdown, "+264.1 ms"
+    assert_includes markdown, "Worker runtime | unchanged | 0.0%"
+  end
+
   private
 
   def real_pair_payload
     baseline = execution(sql_queries: 14)
     candidate = execution(sql_queries: 19)
     Plywo::ExecutionPair.call(baseline:, candidate:)
+  end
+
+  def async_regression_payload
+    Plywo::ExecutionPair.call(
+      baseline: async_execution(queue_wait_ms: 137.5),
+      candidate: async_execution(queue_wait_ms: 401.6)
+    )
   end
 
   def execution(sql_queries:)
@@ -68,5 +86,22 @@ class PlywoGithubCommentRendererTest < ActiveSupport::TestCase
         "errors" => 0
       }
     }
+  end
+
+  def async_execution(queue_wait_ms:)
+    execution(sql_queries: 17).merge(
+      "measurements" => {
+        "duration_ms" => 50.0,
+        "thread_cpu_ms" => 20.0,
+        "queue_wait_ms" => queue_wait_ms,
+        "worker_wall_ms" => 0.1,
+        "worker_thread_cpu_ms" => 0.1,
+        "sql_queries" => 17,
+        "background_jobs" => 1,
+        "emails" => 1,
+        "http_requests" => 1,
+        "errors" => 0
+      }
+    )
   end
 end

@@ -1,3 +1,4 @@
+require_relative "async_delta_diagnosis"
 require_relative "async_diagnosis"
 require_relative "runtime_diagnosis"
 
@@ -175,6 +176,10 @@ module Plywo
           thread_cpu: signals.fetch("thread_cpu_ms")
         ),
         "async" => async_scope_diagnosis(
+          queue_wait: signals.fetch("queue_wait_ms"),
+          worker_wall: signals.fetch("worker_wall_ms")
+        ),
+        "async_delta" => AsyncDeltaDiagnosis.call(
           queue_wait: signals.fetch("queue_wait_ms"),
           worker_wall: signals.fetch("worker_wall_ms")
         ),
