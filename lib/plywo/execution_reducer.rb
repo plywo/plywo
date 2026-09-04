@@ -1,6 +1,7 @@
 module Plywo
   class ExecutionReducer
-    COUNTABLE_SIGNALS = BehavioralDiff::SIGNALS.keys.reject { |signal| signal == "duration_ms" }.freeze
+    COUNTABLE_SIGNALS = %w[sql_queries background_jobs emails http_requests errors].freeze
+    SUMMABLE_RUNTIME_SIGNALS = %w[worker_wall_ms worker_process_cpu_ms worker_thread_cpu_ms].freeze
 
     def self.call(execution:)
       new(execution:).call
@@ -16,7 +17,7 @@ module Plywo
 
       durable_observations.each do |observation|
         signal = observation.fetch("signal")
-        measurements[signal] = measurements.fetch(signal, 0).to_f + 1 if COUNTABLE_SIGNALS.include?(signal)
+        fold_measurement!(measurements, signal, observation)
         append_attribution(attributions, signal, observation)
       end
 
@@ -25,6 +26,7 @@ module Plywo
       @execution.merge(
         "measurements" => measurements,
         "attributions" => attributions,
+        "runtime_profile" => runtime_profile(measurements),
         "evidence" => {
           "foreground" => true,
           "durable_observations" => durable_observations.size
@@ -36,6 +38,21 @@ module Plywo
 
     def durable_observations
       @durable_observations ||= Array(@execution["durable_observations"]).map { |observation| deep_stringify_keys(observation) }
+    end
+
+    def fold_measurement!(measurements, signal, observation)
+      if COUNTABLE_SIGNALS.include?(signal)
+        measurements[signal] = measurements.fetch(signal, 0).to_f + 1
+      elsif SUMMABLE_RUNTIME_SIGNALS.include?(signal)
+        value = numeric_runtime_value(observation)
+        measurements[signal] = measurements.fetch(signal, 0).to_f + value if value
+      end
+    end
+
+    def numeric_runtime_value(observation)
+      Float(observation.dig("payload", "value"))
+    rescue ArgumentError, TypeError
+      nil
     end
 
     def append_attribution(attributions, signal, observation)
@@ -59,11 +76,47 @@ module Plywo
 
     def normalize_numeric_measurements!(measurements)
       measurements.each do |signal, value|
-        next unless COUNTABLE_SIGNALS.include?(signal)
-        next unless value.is_a?(Float) && value.to_i == value
-
-        measurements[signal] = value.to_i
+        if COUNTABLE_SIGNALS.include?(signal) && value.is_a?(Float) && value.to_i == value
+          measurements[signal] = value.to_i
+        elsif SUMMABLE_RUNTIME_SIGNALS.include?(signal)
+          measurements[signal] = value.to_f.round(1)
+        end
       end
+    end
+
+    def runtime_profile(measurements)
+      {
+        "request" => classify_runtime(
+          wall_ms: measurements.fetch("duration_ms", 0.0),
+          thread_cpu_ms: measurements.fetch("thread_cpu_ms", 0.0)
+        ),
+        "worker" => classify_runtime(
+          wall_ms: measurements.fetch("worker_wall_ms", 0.0),
+          thread_cpu_ms: measurements.fetch("worker_thread_cpu_ms", 0.0)
+        )
+      }
+    end
+
+    def classify_runtime(wall_ms:, thread_cpu_ms:)
+      wall_ms = wall_ms.to_f
+      thread_cpu_ms = thread_cpu_ms.to_f
+      return { "classification" => "unknown", "cpu_ratio_percent" => nil } unless wall_ms.positive?
+
+      ratio = ((thread_cpu_ms / wall_ms) * 100).round(1)
+      classification = if ratio >= 70.0
+        "cpu_bound"
+      elsif ratio <= 30.0
+        "wait_bound"
+      else
+        "mixed"
+      end
+
+      {
+        "classification" => classification,
+        "cpu_ratio_percent" => ratio,
+        "wall_ms" => wall_ms.round(1),
+        "thread_cpu_ms" => thread_cpu_ms.round(1)
+      }
     end
 
     def deep_stringify_keys(value)
