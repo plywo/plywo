@@ -20,7 +20,7 @@ class PlywoExecutionPairTest < ActiveSupport::TestCase
       baseline = execution(id: "main", sql_queries: 14)
       candidate = execution(id: "candidate", sql_queries: 19).merge(
         "attributions" => {
-          "sql_queries" => [source(confidence:)]
+          "sql_queries" => [ source(confidence:) ]
         }
       )
 
@@ -86,7 +86,7 @@ class PlywoExecutionPairTest < ActiveSupport::TestCase
     baseline = execution(id: "main", sql_queries: 14)
     candidate = execution(id: "candidate", sql_queries: 19).merge(
       "attributions" => {
-        "sql_queries" => [source(confidence: "inferred")]
+        "sql_queries" => [ source(confidence: "inferred") ]
       }
     )
 
