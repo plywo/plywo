@@ -11,7 +11,7 @@ module Plywo
           mutate(execution_id:, job:) do |item, now|
             assign_context(item, context:, job:)
             item.status = "enqueued"
-            item.enqueued_at ||= now
+            item.enqueued_at = now
             item.started_at = nil
             item.finished_at = nil
             item.error_class = nil
