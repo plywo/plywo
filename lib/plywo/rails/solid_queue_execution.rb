@@ -152,12 +152,31 @@ module Plywo
           pids = SolidQueue::Process.where(kind: "Worker").pluck(:pid)
           return pids if pids.any?
 
+          if (status = reap_supervisor_nonblock)
+            raise "Solid Queue supervisor exited before worker registration " \
+                  "(status=#{status.exitstatus.inspect}):\n#{worker_log}"
+          end
+
           if monotonic_time - started_at >= start_timeout_seconds
-            raise "Solid Queue worker did not register within #{start_timeout_seconds}s"
+            raise "Solid Queue worker did not register within #{start_timeout_seconds}s:\n#{worker_log}"
           end
 
           sleep 0.05
         end
+      end
+
+      def reap_supervisor_nonblock
+        pid = @supervisor_pid
+        return unless pid
+
+        waited_pid, status = Process.wait2(pid, Process::WNOHANG)
+        return unless waited_pid
+
+        @supervisor_pid = nil
+        status
+      rescue Errno::ECHILD
+        @supervisor_pid = nil
+        nil
       end
 
       def worker_environment
