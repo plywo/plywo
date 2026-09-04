@@ -10,6 +10,10 @@ permissions:
   issues: write
   pull-requests: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -49,23 +53,81 @@ jobs:
       - name: Test
         run: bin/rails test
 
-      - name: Dogfood Rails execution capture
+      - name: Dogfood Rails instrumentation
         env:
           PLYWO_OUTPUT: tmp/plywo-dogfood.json
         run: bin/rails plywo:dogfood
+
+      - name: Prepare real Git subjects
+        if: github.event_name == 'pull_request'
+        run: |
+          git worktree add --detach /tmp/plywo-base "${{ github.event.pull_request.base.sha }}"
+          git worktree add --detach /tmp/plywo-candidate "${{ github.event.pull_request.head.sha }}"
+
+      - name: Prepare isolated subject databases
+        if: github.event_name == 'pull_request'
+        env:
+          BUNDLE_PATH: ${{ github.workspace }}/vendor/bundle
+        run: |
+          (
+            cd /tmp/plywo-base
+            DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/plywo_base bundle exec rails db:prepare
+          )
+          (
+            cd /tmp/plywo-candidate
+            DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/plywo_candidate bundle exec rails db:prepare
+          )
+
+      - name: Capture baseline subject
+        if: github.event_name == 'pull_request'
+        env:
+          BUNDLE_PATH: ${{ github.workspace }}/vendor/bundle
+          PLYWO_RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
+          PLYWO_SCENARIO_ID: dogfood.git.behavior
+          PLYWO_SUBJECT: git-comparison
+          PLYWO_EXECUTION_LABEL: ${{ github.base_ref }}
+          PLYWO_EXECUTION_SHA: ${{ github.event.pull_request.base.sha }}
+          PLYWO_OUTPUT: /tmp/plywo-base.json
+        run: |
+          cd /tmp/plywo-base
+          DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/plywo_base \
+            bundle exec ruby "${GITHUB_WORKSPACE}/script/plywo_capture_subject.rb"
+
+      - name: Capture candidate subject
+        if: github.event_name == 'pull_request'
+        env:
+          BUNDLE_PATH: ${{ github.workspace }}/vendor/bundle
+          PLYWO_RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
+          PLYWO_SCENARIO_ID: dogfood.git.behavior
+          PLYWO_SUBJECT: git-comparison
+          PLYWO_EXECUTION_LABEL: ${{ github.head_ref }}
+          PLYWO_EXECUTION_SHA: ${{ github.event.pull_request.head.sha }}
+          PLYWO_OUTPUT: /tmp/plywo-candidate.json
+        run: |
+          cd /tmp/plywo-candidate
+          DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/plywo_candidate \
+            bundle exec ruby "${GITHUB_WORKSPACE}/script/plywo_capture_subject.rb"
+
+      - name: Compare real Git subjects
+        if: github.event_name == 'pull_request'
+        env:
+          PLYWO_BASELINE_INPUT: /tmp/plywo-base.json
+          PLYWO_CANDIDATE_INPUT: /tmp/plywo-candidate.json
+          PLYWO_OUTPUT: tmp/plywo-git-comparison.json
+        run: bin/rails plywo:compare_executions
 
       - name: Publish Plywo GitHub feedback
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PLYWO_INPUT: tmp/plywo-dogfood.json
+          PLYWO_INPUT: tmp/plywo-git-comparison.json
           PLYWO_PUBLISH: "1"
           PLYWO_COMMENT_AUTHOR: github-actions[bot]
-          PLYWO_BOOTSTRAP_BASELINE: "1"
-          PLYWO_BASELINE_LABEL: dogfood-baseline
-          PLYWO_BASELINE_SHA: synthetic
+          PLYWO_BASELINE_LABEL: ${{ github.base_ref }}
+          PLYWO_BASELINE_SHA: ${{ github.event.pull_request.base.sha }}
           PLYWO_CANDIDATE_LABEL: ${{ github.head_ref }}
           PLYWO_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+          PLYWO_EXECUTION_MODE: exact Git worktrees + isolated PostgreSQL databases
           PLYWO_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: bin/rails plywo:github_comment
 

@@ -15,6 +15,18 @@ namespace :plywo do
     abort "Plywo detected a behavioral regression" if ENV["FAIL_ON_REGRESSION"] == "1" && result.fetch("decision") == "regression"
   end
 
+  desc "Compose two captured executions into one behavioral comparison payload"
+  task compare_executions: :environment do
+    baseline = JSON.parse(File.read(ENV.fetch("PLYWO_BASELINE_INPUT")))
+    candidate = JSON.parse(File.read(ENV.fetch("PLYWO_CANDIDATE_INPUT")))
+    payload = Plywo::ExecutionPair.call(baseline:, candidate:)
+
+    puts Plywo::ReportRenderer.markdown(payload.fetch("result"))
+    puts
+    puts JSON.pretty_generate(payload)
+    File.write(ENV.fetch("PLYWO_OUTPUT"), JSON.pretty_generate(payload)) if ENV["PLYWO_OUTPUT"]
+  end
+
   desc "Render and optionally publish the durable Plywo GitHub PR comment"
   task github_comment: :environment do
     payload = JSON.parse(File.read(ENV.fetch("PLYWO_INPUT")))
@@ -33,6 +45,7 @@ namespace :plywo do
       candidate_label: ENV["PLYWO_CANDIDATE_LABEL"] || event.dig("pull_request", "head", "ref"),
       candidate_sha: ENV["PLYWO_CANDIDATE_SHA"] || event.dig("pull_request", "head", "sha"),
       bootstrap_baseline: ENV["PLYWO_BOOTSTRAP_BASELINE"],
+      execution_mode: ENV["PLYWO_EXECUTION_MODE"],
       run_url: ENV["PLYWO_RUN_URL"]
     }
     markdown = Plywo::Github::CommentRenderer.markdown(payload:, context:)
@@ -50,7 +63,8 @@ namespace :plywo do
       repository: ENV.fetch("GITHUB_REPOSITORY"),
       pr_number: Integer(pr_number),
       body: markdown,
-      author: ENV["PLYWO_COMMENT_AUTHOR"]
+      author: ENV["PLYWO_COMMENT_AUTHOR"],
+      expected_head_sha: context.fetch(:candidate_sha)
     )
     puts "Plywo GitHub comment #{action}."
   end

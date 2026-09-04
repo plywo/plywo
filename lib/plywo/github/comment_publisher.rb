@@ -10,7 +10,9 @@ module Plywo
         @api_url = api_url.sub(%r{/+$}, "")
       end
 
-      def upsert(repository:, pr_number:, body:, author: nil)
+      def upsert(repository:, pr_number:, body:, author: nil, expected_head_sha: nil)
+        return :stale if stale_head?(repository:, pr_number:, expected_head_sha:)
+
         comments = request(:get, "/repos/#{repository}/issues/#{pr_number}/comments?per_page=100")
         existing = comments.find { |comment| owned_comment?(comment, author:) }
 
@@ -24,6 +26,13 @@ module Plywo
       end
 
       private
+
+      def stale_head?(repository:, pr_number:, expected_head_sha:)
+        return false unless expected_head_sha
+
+        pull_request = request(:get, "/repos/#{repository}/pulls/#{pr_number}")
+        pull_request.dig("head", "sha") != expected_head_sha
+      end
 
       def owned_comment?(comment, author:)
         marker_matches = comment.fetch("body", "").include?(CommentRenderer::MARKER)
