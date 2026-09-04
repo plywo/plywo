@@ -12,6 +12,7 @@ class PlywoSubjectCapture
 
   def call
     warm_runtime
+    reset_test_queue
 
     execution_id = SecureRandom.uuid
     response = nil
@@ -23,7 +24,9 @@ class PlywoSubjectCapture
     measurements["errors"] += 1 unless passed
 
     Current.reset
-    perform_durable_worker(execution_id:)
+    application_job_executions = Plywo::Rails::TestQueueExecution.drain(execution_id:)
+
+    raise "Expected the application request to enqueue at least one correlated job" if application_job_executions.empty?
 
     payload = {
       "id" => label,
@@ -39,9 +42,11 @@ class PlywoSubjectCapture
       "measurements" => measurements,
       "attributions" => collector.respond_to?(:attributions) ? collector.attributions : {},
       "durable_observations" => durable_observations(execution_id:),
+      "application_job_executions" => application_job_executions,
       "lifecycle" => {
         "foreground_collector_closed_before_worker" => true,
-        "current_cleared_before_worker" => true
+        "current_cleared_before_worker" => true,
+        "worker_origin" => "application_enqueue"
       }
     }
 
@@ -49,6 +54,7 @@ class PlywoSubjectCapture
     puts JSON.pretty_generate(payload)
   ensure
     Current.reset
+    reset_test_queue
   end
 
   private
@@ -58,17 +64,10 @@ class PlywoSubjectCapture
     request.post(path, headers(execution_id: "warmup", subject: "warmup"))
   end
 
-  def perform_durable_worker(execution_id:)
-    serialized = Current.set(
-      plywo_execution_id: execution_id,
-      plywo_run_id: run_id,
-      plywo_subject: subject
-    ) do
-      DemoAsyncEvidenceJob.new.serialize
-    end
-
-    Current.reset
-    ActiveJob::Base.deserialize(serialized).perform_now
+  def reset_test_queue
+    adapter = ActiveJob::Base.queue_adapter
+    adapter.enqueued_jobs.clear if adapter.respond_to?(:enqueued_jobs)
+    adapter.performed_jobs.clear if adapter.respond_to?(:performed_jobs)
   end
 
   def durable_observations(execution_id:)
