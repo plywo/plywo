@@ -87,11 +87,13 @@ begin
       worker_pid = nil
     ensure
       if worker_pid
-        Process.kill("TERM", worker_pid)
-        Process.wait(worker_pid)
+        begin
+          Process.kill("TERM", worker_pid)
+          Process.wait(worker_pid)
+        rescue Errno::ESRCH, Errno::ECHILD
+          nil
+        end
       end
-    rescue Errno::ESRCH, Errno::ECHILD
-      nil
     end
 
     worker_log = File.read(log_path)
