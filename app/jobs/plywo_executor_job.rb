@@ -12,7 +12,10 @@ class PlywoExecutorJob < ApplicationJob
   private
 
   def execute(request:)
-    Plywo::Executor::Result.success(executor.call(request:))
+    result = executor.call(request:)
+    return result if result.is_a?(Plywo::Executor::Result)
+
+    raise TypeError, "Executor adapter must return Plywo::Executor::Result"
   rescue StandardError => error
     Plywo::Executor::Result.failure(error)
   end
