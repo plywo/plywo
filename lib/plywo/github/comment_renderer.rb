@@ -3,7 +3,12 @@ module Plywo
     class CommentRenderer
       MARKER = "<!-- plywo:behavioral-diff:v1 -->".freeze
       SIGNAL_LABELS = {
-        "duration_ms" => "Request time",
+        "duration_ms" => "Request wall time",
+        "process_cpu_ms" => "Request process CPU",
+        "thread_cpu_ms" => "Request thread CPU",
+        "worker_wall_ms" => "Worker wall time",
+        "worker_process_cpu_ms" => "Worker process CPU",
+        "worker_thread_cpu_ms" => "Worker thread CPU",
         "sql_queries" => "SQL queries",
         "background_jobs" => "Background jobs",
         "emails" => "Emails",
@@ -29,6 +34,7 @@ module Plywo
       def markdown
         lines = [ MARKER, "## 🟣 Plywo · Behavioral Review", "", summary_callout, "" ]
         lines.concat(signal_table)
+        lines.concat(runtime_diagnosis_section)
         lines.concat(findings_section)
         lines.concat(execution_section)
         lines.concat(bootstrap_note) if bootstrap_baseline?
@@ -73,12 +79,36 @@ module Plywo
         ]
 
         result.fetch("signals").each do |signal, values|
-          verdict = values.fetch("regression") ? "⚠️ Regression" : "✅ Stable"
+          verdict = if !values.fetch("decision_relevant", true)
+            "ℹ️ Observed"
+          elsif values.fetch("regression")
+            "⚠️ Regression"
+          else
+            "✅ Stable"
+          end
           lines << "| **#{SIGNAL_LABELS.fetch(signal, signal)}** | #{format_value(signal, values.fetch("baseline"))} | " \
             "#{format_value(signal, values.fetch("candidate"))} | **#{values.fetch("display_delta")}** | #{verdict} |"
         end
 
         [ "### Runtime diff", "", *lines, "" ]
+      end
+
+      def runtime_diagnosis_section
+        diagnosis = result.fetch("runtime_diagnosis", {})
+        return [] if diagnosis.empty?
+
+        lines = [ "### Runtime diagnosis", "", "| Scope | Baseline | Candidate | Candidate CPU ratio |", "| --- | --- | --- | ---: |" ]
+        %w[request worker].each do |scope|
+          profile = diagnosis[scope]
+          next unless profile
+
+          baseline = profile.fetch("baseline")
+          candidate = profile.fetch("candidate")
+          lines << "| #{scope.capitalize} | #{runtime_classification(baseline)} | #{runtime_classification(candidate)} | " \
+            "#{format_ratio(candidate.fetch("cpu_ratio_percent"))} |"
+        end
+        lines << ""
+        lines
       end
 
       def findings_section
@@ -136,7 +166,15 @@ module Plywo
       end
 
       def format_value(signal, value)
-        signal == "duration_ms" ? format("%.1f ms", value) : value.to_i.to_s
+        signal.end_with?("_ms") ? format("%.1f ms", value) : value.to_i.to_s
+      end
+
+      def runtime_classification(profile)
+        profile.fetch("classification", "unknown").tr("_", " ")
+      end
+
+      def format_ratio(value)
+        value.nil? ? "n/a" : "#{format("%.1f", value)}%"
       end
 
       def display_percent(value)
