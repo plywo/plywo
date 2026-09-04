@@ -26,7 +26,7 @@ class PlywoQueueWaitSignalTest < ActiveSupport::TestCase
       kind: "active_job",
       work_id: job.job_id,
       status: "enqueued",
-      enqueued_at: 200.milliseconds.ago
+      enqueued_at: Time.current - 0.2
     )
 
     Current.reset
