@@ -9,7 +9,7 @@ class GithubPullRequestExecutionLeaseExpiryJob < ApplicationJob
   def perform(execution_record_id, expired_at)
     execution = PlywoExecution.find(execution_record_id)
 
-    if execution.status == "running"
+    if PlywoExecution::LEASED_STATUSES.include?(execution.status)
       return unless execution.expire_lease!(now: expired_at)
     elsif !lease_failure?(execution)
       return
