@@ -56,7 +56,7 @@ class PlywoRailsEvidenceCollectorTest < ActiveSupport::TestCase
     measurements = collector.capture do
       Current.set(plywo_execution_id: execution_id) do
         enqueue_line = __LINE__ + 1
-        DemoNotificationJob.perform_later(execution_id)
+        DemoNotificationJob.perform_later
       end
     end
 
