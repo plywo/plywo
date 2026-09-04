@@ -4,10 +4,12 @@ require "securerandom"
 
 class PlywoExecutorRequest < ApplicationRecord
   Acquisition = Data.define(:state, :record, :claim_token)
+  Cancellation = Data.define(:state, :record)
   DigestMismatch = Class.new(StandardError)
 
-  STATUSES = %w[processing completed].freeze
+  STATUSES = %w[processing completed cancelled].freeze
   DEFAULT_LEASE_SECONDS = 2_400
+  CANCELLED_BEFORE_REQUEST_DIGEST = "cancelled-before-request".freeze
 
   validates :idempotency_key, :request_digest, :status, presence: true
   validates :idempotency_key, uniqueness: true
@@ -21,6 +23,7 @@ class PlywoExecutorRequest < ApplicationRecord
 
     loop do
       if (record = find_by(idempotency_key:))
+        return Acquisition.new(state: :cancelled, record:, claim_token: nil) if record.status == "cancelled"
         raise DigestMismatch, "Idempotency key was reused for a different executor request" if record.request_digest != request_digest
         return Acquisition.new(state: :completed, record:, claim_token: nil) if record.status == "completed"
 
@@ -59,6 +62,47 @@ class PlywoExecutorRequest < ApplicationRecord
           lease_expires_at: now + lease_seconds.seconds
         )
         return Acquisition.new(state: :execute, record:, claim_token:)
+      rescue ActiveRecord::RecordNotUnique
+        next
+      end
+    end
+  end
+
+  def self.cancel!(idempotency_key:, reason: "cancelled", now: Time.current)
+    loop do
+      if (record = find_by(idempotency_key:))
+        return Cancellation.new(state: :completed, record:) if record.status == "completed"
+        return Cancellation.new(state: :cancelled, record:) if record.status == "cancelled"
+
+        cancelled = where(id: record.id, status: "processing").update_all(
+          status: "cancelled",
+          claim_token: nil,
+          lease_expires_at: nil,
+          cancellation_reason: reason.to_s,
+          cancelled_at: now,
+          finished_at: now,
+          updated_at: now
+        )
+        next unless cancelled == 1
+
+        record.reload
+        return Cancellation.new(state: :cancelled, record:)
+      end
+
+      begin
+        record = create!(
+          idempotency_key:,
+          request_digest: CANCELLED_BEFORE_REQUEST_DIGEST,
+          status: "cancelled",
+          claim_token: nil,
+          request_payload: {},
+          result: {},
+          cancellation_reason: reason.to_s,
+          cancelled_at: now,
+          finished_at: now,
+          lease_expires_at: nil
+        )
+        return Cancellation.new(state: :cancelled, record:)
       rescue ActiveRecord::RecordNotUnique
         next
       end
