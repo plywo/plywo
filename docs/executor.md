@@ -51,27 +51,46 @@ error_message
 
 ## Dispatch lifecycle
 
-The GitHub orchestration job now claims the durable execution and performs the first exact base/head check before enqueueing `PlywoExecutorJob` with a plain request hash.
+The GitHub orchestration job claims the durable execution and performs the first exact base/head check before enqueueing `PlywoExecutorJob` with a plain request hash.
 
 `PlywoExecutorJob` reconstructs the request, runs the selected adapter, converts either the payload or exception into `Plywo::Executor::Result`, and enqueues `GithubPullRequestExecutionFinalizeJob`.
 
-The finalizer is back inside the control-plane trust boundary. It refreshes GitHub state, rejects stale results, classifies the durable execution, and publishes the Check Run and PR comment.
+The finalizer is back inside the control-plane trust boundary. It renews the still-live execution lease, refreshes GitHub state, rejects stale results, classifies the durable execution, and publishes the Check Run and PR comment.
 
 ```text
 GithubPullRequestExecutionJob
-  -> claim attempt
+  -> claim attempt + lease
   -> GitHub preflight
   -> Request.to_h
   -> PlywoExecutorJob
        -> adapter
        -> Result.to_h
   -> GithubPullRequestExecutionFinalizeJob
+       -> renew live lease
        -> GitHub stale guard
        -> durable outcome
        -> GitHub publication
 ```
 
 The executor job does not receive a GitHub App token or private key.
+
+## Execution leases
+
+A successful claim creates a lease and records `heartbeat_at` plus `lease_expires_at`. The default lease is 30 minutes and can be configured with `PLYWO_EXECUTION_LEASE_SECONDS`.
+
+A result is accepted only while the lease is still live. The finalizer renews that lease before doing network publication work. A late result cannot revive an execution whose lease has already expired.
+
+Production Solid Queue runs `GithubPullRequestExecutionLeaseReaperJob` every minute. It schedules an expiry job for overdue GitHub executions. The expiry transition is atomic: it succeeds only while the execution is still `running` and its recorded lease is still expired. A concurrent finalizer that renewed the lease therefore wins safely and prevents expiry.
+
+An abandoned execution becomes:
+
+```text
+status  = failed
+outcome = infra_failure
+failure = Plywo::Executor::LeaseExpired: ...
+```
+
+The control plane then publishes the normal `INFRA_FAILURE` Check and comment. Publication is idempotent, and the expiry job can retry publication for an execution already terminal with the same lease-expiry failure.
 
 ## Adapters
 
@@ -87,6 +106,7 @@ The executor can report observations and execution failures. It does not decide 
 
 - exact recorded base/head identity
 - stale checks before dispatch and finalization
+- execution lease ownership and expiry
 - behavioral outcome classification
 - `INFRA_FAILURE` versus product regression
 - retry eligibility and attempt counting
@@ -94,6 +114,6 @@ The executor can report observations and execution failures. It does not decide 
 
 This keeps an executor replaceable: local process, container, VM, Kubernetes job, or another disposable worker can implement the same boundary.
 
-## Known reliability gap
+## Remote heartbeat boundary
 
-After an execution is claimed it remains `running` until a result reaches the finalizer. A hard worker/process loss between dispatch and finalization can therefore strand an execution in `running`. The production executor slice must add a lease/heartbeat or timeout/reaper before remote compute is considered durable.
+The current local adapter normally completes well inside the default lease. A future long-running remote executor should renew its lease through a narrow authenticated control-plane heartbeat endpoint rather than receiving database access or GitHub credentials. That heartbeat protocol is intentionally deferred to the remote-executor slice.
