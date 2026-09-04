@@ -1,7 +1,7 @@
 module Plywo
   module Executor
     class LocalAdapter
-      def initialize(root: Rails.root, runner: nil)
+      def initialize(root: ::Rails.root, runner: nil)
         @runner = runner || Plywo::Github::LocalPullRequestRunner.new(root:)
       end
 
