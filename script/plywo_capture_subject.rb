@@ -6,10 +6,6 @@ require "securerandom"
 
 require File.join(Dir.pwd, "config/environment")
 
-unless defined?(Plywo::Rails::TestQueueExecution::DEFAULT_MAX_JOBS)
-  require File.expand_path("../lib/plywo/rails/test_queue_execution", __dir__)
-end
-
 unless defined?(Plywo::Rails::ExecutionQuiescence)
   require File.expand_path("../lib/plywo/rails/execution_quiescence", __dir__)
 end
@@ -34,8 +30,9 @@ class PlywoSubjectCapture
     measurements["errors"] += 1 unless passed
 
     Current.reset
-    application_job_executions = Plywo::Rails::TestQueueExecution.drain(execution_id:)
-    quiescence = wait_for_quiescence(execution_id:)
+    async_result = drive_async_work(execution_id:)
+    application_job_executions = async_result.fetch("executions")
+    quiescence = async_result.fetch("quiescence")
 
     raise "Expected the application request to enqueue at least one correlated job" if application_job_executions.empty?
 
@@ -67,6 +64,7 @@ class PlywoSubjectCapture
         "foreground_collector_closed_before_worker" => true,
         "current_cleared_before_worker" => true,
         "worker_origin" => "application_enqueue",
+        "async_transport" => async_result.fetch("transport"),
         "completion_source" => "durable_work_ledger",
         "quiescence" => quiescence
       }
@@ -84,6 +82,39 @@ class PlywoSubjectCapture
   def warm_runtime
     ApplicationRecord.connection.select_value("SELECT 1")
     request.post(path, headers(execution_id: "warmup", subject: "warmup"))
+  end
+
+  def drive_async_work(execution_id:)
+    if async_transport == "solid_queue"
+      require_solid_queue_execution
+      Plywo::Rails::SolidQueueExecution.call(
+        execution_id:,
+        quiescence_timeout_seconds: Float(
+          ENV.fetch("PLYWO_QUIESCENCE_TIMEOUT_SECONDS", DEFAULT_QUIESCENCE_TIMEOUT_SECONDS)
+        ),
+        quiet_period_seconds: Float(ENV.fetch("PLYWO_QUIET_PERIOD_SECONDS", DEFAULT_QUIET_PERIOD_SECONDS))
+      )
+    else
+      require_test_queue_execution
+      executions = Plywo::Rails::TestQueueExecution.drain(execution_id:)
+      {
+        "executions" => executions,
+        "quiescence" => wait_for_quiescence(execution_id:),
+        "transport" => { "name" => "active_job_test_adapter" }
+      }
+    end
+  end
+
+  def require_test_queue_execution
+    return if defined?(Plywo::Rails::TestQueueExecution::DEFAULT_MAX_JOBS)
+
+    require File.expand_path("../lib/plywo/rails/test_queue_execution", __dir__)
+  end
+
+  def require_solid_queue_execution
+    return if defined?(Plywo::Rails::SolidQueueExecution)
+
+    require File.expand_path("../lib/plywo/rails/solid_queue_execution", __dir__)
   end
 
   def reset_test_queue
@@ -132,6 +163,10 @@ class PlywoSubjectCapture
 
   def path
     ENV.fetch("PLYWO_SCENARIO_PATH", DEFAULT_PATH)
+  end
+
+  def async_transport
+    ENV.fetch("PLYWO_ASYNC_TRANSPORT", "test_adapter")
   end
 
   def run_id

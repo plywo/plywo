@@ -86,17 +86,25 @@ jobs:
         run: |
           (
             cd /tmp/plywo-base
-            DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/plywo_base bundle exec rails db:prepare
+            DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/plywo_base \
+            SOLID_QUEUE_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/plywo_base_queue \
+              bundle exec rails db:prepare
           )
           (
             cd /tmp/plywo-candidate
-            DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/plywo_candidate bundle exec rails db:prepare
+            DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/plywo_candidate \
+            SOLID_QUEUE_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/plywo_candidate_queue \
+              bundle exec rails db:prepare
           )
 
       - name: Capture baseline subject
         if: github.event_name == 'pull_request'
         env:
           BUNDLE_PATH: ${{ github.workspace }}/vendor/bundle
+          PLYWO_SOLID_QUEUE: "1"
+          PLYWO_ASYNC_TRANSPORT: solid_queue
+          SOLID_QUEUE_SKIP_RECURRING: "true"
+          SOLID_QUEUE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/plywo_base_queue
           PLYWO_RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
           PLYWO_SCENARIO_ID: dogfood.git.behavior
           PLYWO_SUBJECT: git-comparison
@@ -112,6 +120,10 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           BUNDLE_PATH: ${{ github.workspace }}/vendor/bundle
+          PLYWO_SOLID_QUEUE: "1"
+          PLYWO_ASYNC_TRANSPORT: solid_queue
+          SOLID_QUEUE_SKIP_RECURRING: "true"
+          SOLID_QUEUE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/plywo_candidate_queue
           PLYWO_RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
           PLYWO_SCENARIO_ID: dogfood.git.behavior
           PLYWO_SUBJECT: git-comparison
@@ -153,7 +165,7 @@ jobs:
           PLYWO_BASELINE_SHA: ${{ github.event.pull_request.base.sha }}
           PLYWO_CANDIDATE_LABEL: ${{ github.head_ref }}
           PLYWO_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
-          PLYWO_EXECUTION_MODE: exact Git worktrees + isolated PostgreSQL databases
+          PLYWO_EXECUTION_MODE: exact Git worktrees + isolated PostgreSQL + Solid Queue databases
           PLYWO_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: bin/rails plywo:github_comment
 
