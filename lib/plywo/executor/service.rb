@@ -4,6 +4,7 @@ module Plywo
       Error = Class.new(StandardError)
       RequestConflict = Class.new(Error)
       RequestInProgress = Class.new(Error)
+      RequestCancelled = Class.new(Error)
       ClaimLost = Class.new(Error)
 
       def initialize(adapter:, request_model: PlywoExecutorRequest, lease_seconds: nil)
@@ -23,6 +24,8 @@ module Plywo
         case acquisition.state
         when :completed
           Result.from_h(acquisition.record.result)
+        when :cancelled
+          raise RequestCancelled, "Executor request was cancelled"
         when :in_progress
           raise RequestInProgress, "Executor request is already processing"
         when :execute
@@ -30,6 +33,10 @@ module Plywo
         else
           raise Error, "Unsupported executor request acquisition state #{acquisition.state.inspect}"
         end
+      end
+
+      def cancel(idempotency_key:, reason: "cancelled")
+        @request_model.cancel!(idempotency_key:, reason:)
       end
 
       private
@@ -62,10 +69,7 @@ module Plywo
           result_payload: result.to_h
         )
 
-        current = @request_model.find(acquisition.record.id)
-        return Result.from_h(current.result) if current.status == "completed"
-
-        raise ClaimLost, "Executor request claim expired before completion"
+        resolve_lost_claim!(record_id: acquisition.record.id, fallback: "Executor request claim expired before completion")
       rescue StandardError => error
         raise if error.is_a?(Error)
 
@@ -75,7 +79,18 @@ module Plywo
           result_payload: result.to_h
         )
 
-        raise ClaimLost, "Executor request claim expired while handling a worker failure"
+        resolve_lost_claim!(
+          record_id: acquisition.record.id,
+          fallback: "Executor request claim expired while handling a worker failure"
+        )
+      end
+
+      def resolve_lost_claim!(record_id:, fallback:)
+        current = @request_model.find(record_id)
+        return Result.from_h(current.result) if current.status == "completed"
+        raise RequestCancelled, "Executor request was cancelled" if current.status == "cancelled"
+
+        raise ClaimLost, fallback
       end
     end
   end
