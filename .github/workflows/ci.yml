@@ -57,6 +57,9 @@ jobs:
       - name: Dogfood durable worker evidence
         run: bundle exec ruby script/plywo_durable_worker_evidence.rb
 
+      - name: Dogfood isolated worker process
+        run: bundle exec ruby script/plywo_os_process_worker_proof.rb
+
       - name: Dogfood Rails instrumentation
         env:
           PLYWO_OUTPUT: tmp/plywo-dogfood.json
