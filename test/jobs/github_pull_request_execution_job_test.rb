@@ -38,9 +38,29 @@ class GithubPullRequestExecutionJobTest < ActiveJob::TestCase
     execution.reload
     assert_equal "completed", execution.status
     assert_equal "allow", execution.decision
+    assert_equal "allow", execution.outcome
+    assert_equal 1, execution.attempt_count
     assert_equal payload, execution.result
     assert_equal 1, runner.calls
     assert_equal 1, publisher.calls
+  end
+
+  test "classifies a runner error as infra failure and publishes that outcome" do
+    execution = create_execution
+    client = sequence_client([ current_pull_request, current_pull_request ])
+    runner = failing_runner(RuntimeError.new("worker unavailable"))
+    publisher = counting_publisher(check: :created, comment: :created)
+
+    assert_raises(RuntimeError) do
+      perform_job(execution:, client:, runner:, publisher:)
+    end
+
+    execution.reload
+    assert_equal "failed", execution.status
+    assert_equal "infra_failure", execution.outcome
+    assert_equal 1, execution.attempt_count
+    assert execution.rerunnable?
+    assert_equal 1, publisher.infra_calls
   end
 
   test "ignores a stale head before running" do
@@ -53,6 +73,7 @@ class GithubPullRequestExecutionJobTest < ActiveJob::TestCase
     perform_job(execution:, client: sequence_client([ stale ]), runner:, publisher:)
 
     assert_equal "ignored", execution.reload.status
+    assert_equal "stale", execution.outcome
     assert_equal "stale_head", execution.failure
     assert_equal 0, runner.calls
     assert_equal 0, publisher.calls
@@ -73,6 +94,7 @@ class GithubPullRequestExecutionJobTest < ActiveJob::TestCase
     )
 
     assert_equal "ignored", execution.reload.status
+    assert_equal "stale", execution.outcome
     assert_equal "stale_baseline_before_publish", execution.failure
     assert_equal 1, runner.calls
     assert_equal 0, publisher.calls
@@ -156,8 +178,18 @@ class GithubPullRequestExecutionJobTest < ActiveJob::TestCase
     end.new(result, 0)
   end
 
+  def failing_runner(error)
+    Object.new.tap do |runner|
+      runner.define_singleton_method(:call) do |execution:|
+        raise "missing execution" unless execution
+
+        raise error
+      end
+    end
+  end
+
   def counting_publisher(result)
-    Struct.new(:result, :calls) do
+    Struct.new(:result, :calls, :infra_calls) do
       def call(execution:, payload:)
         raise "missing execution" unless execution
         raise "missing payload" unless payload
@@ -165,6 +197,14 @@ class GithubPullRequestExecutionJobTest < ActiveJob::TestCase
         self.calls += 1
         result
       end
-    end.new(result, 0)
+
+      def infra_failure(execution:, error:)
+        raise "missing execution" unless execution
+        raise "missing error" unless error
+
+        self.infra_calls += 1
+        result
+      end
+    end.new(result, 0, 0)
   end
 end
