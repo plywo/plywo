@@ -3,6 +3,8 @@ module Plywo
     class EvidenceCollector
       IGNORED_SQL_NAMES = %w[SCHEMA TRANSACTION CACHE].freeze
 
+      attr_reader :attributions
+
       def self.capture(execution_id:, &block)
         new(execution_id:).capture(&block)
       end
@@ -16,6 +18,7 @@ module Plywo
           "http_requests" => 0,
           "errors" => 0
         }
+        @attributions = Hash.new { |hash, key| hash[key] = [] }
       end
 
       def capture
@@ -38,7 +41,8 @@ module Plywo
           ActiveSupport::Notifications.subscribe("enqueue.active_job") { record_job },
           ActiveSupport::Notifications.subscribe("enqueue_at.active_job") { record_job },
           ActiveSupport::Notifications.subscribe("process_action.action_controller") { |event| record_request(event.payload) },
-          ActiveSupport::Notifications.subscribe(Evidence::EVENT_NAME) { |event| record_side_effect(event.payload) }
+          ActiveSupport::Notifications.subscribe(Evidence::EVENT_NAME) { |event| record_side_effect(event.payload) },
+          ActiveSupport::Notifications.subscribe(Evidence::ATTRIBUTION_EVENT_NAME) { |event| record_attribution(event.payload) }
         ]
       end
 
@@ -65,6 +69,19 @@ module Plywo
         return unless payload[:execution_id].to_s == @execution_id.to_s
 
         @measurements["emails"] += 1 if payload[:type].to_s == "email"
+      end
+
+      def record_attribution(payload)
+        return unless payload[:execution_id].to_s == @execution_id.to_s
+
+        signal = payload.fetch(:signal).to_s
+        location = {
+          "path" => payload.fetch(:path).to_s,
+          "start_line" => Integer(payload.fetch(:start_line)),
+          "end_line" => Integer(payload.fetch(:end_line)),
+          "confidence" => payload.fetch(:confidence).to_s
+        }
+        @attributions[signal] << location unless @attributions[signal].include?(location)
       end
 
       def current_execution?

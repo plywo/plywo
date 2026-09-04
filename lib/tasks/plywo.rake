@@ -19,7 +19,12 @@ namespace :plywo do
   task compare_executions: :environment do
     baseline = JSON.parse(File.read(ENV.fetch("PLYWO_BASELINE_INPUT")))
     candidate = JSON.parse(File.read(ENV.fetch("PLYWO_CANDIDATE_INPUT")))
-    payload = Plywo::ExecutionPair.call(baseline:, candidate:)
+    changed_paths = if ENV["PLYWO_CHANGED_PATHS"] && File.exist?(ENV["PLYWO_CHANGED_PATHS"])
+      File.readlines(ENV.fetch("PLYWO_CHANGED_PATHS"), chomp: true).reject(&:empty?)
+    else
+      []
+    end
+    payload = Plywo::ExecutionPair.call(baseline:, candidate:, changed_paths:)
 
     puts Plywo::ReportRenderer.markdown(payload.fetch("result"))
     puts
@@ -91,7 +96,8 @@ namespace :plywo do
       details_url: ENV.fetch("PLYWO_RUN_URL"),
       conclusion: rendered.fetch("conclusion"),
       title: rendered.fetch("title"),
-      summary: rendered.fetch("summary")
+      summary: rendered.fetch("summary"),
+      annotations: rendered.fetch("annotations")
     )
     puts "Plywo GitHub check #{action}."
   end

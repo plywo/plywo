@@ -15,6 +15,36 @@ class PlywoExecutionPairTest < ActiveSupport::TestCase
     assert_equal "block", payload.dig("result", "merge_recommendation")
   end
 
+  test "attaches an explicit source only when the path changed" do
+    baseline = execution(id: "main", sql_queries: 14)
+    candidate = execution(id: "candidate", sql_queries: 19).merge(
+      "attributions" => {
+        "sql_queries" => [
+          {
+            "path" => "app/controllers/demo/behavior_controller.rb",
+            "start_line" => 20,
+            "end_line" => 20,
+            "confidence" => "explicit"
+          }
+        ]
+      }
+    )
+
+    trusted = Plywo::ExecutionPair.call(
+      baseline:,
+      candidate:,
+      changed_paths: [ "app/controllers/demo/behavior_controller.rb" ]
+    )
+    untrusted = Plywo::ExecutionPair.call(
+      baseline:,
+      candidate:,
+      changed_paths: [ "README.md" ]
+    )
+
+    assert_equal "app/controllers/demo/behavior_controller.rb", trusted.dig("result", "findings", 0, "source", "path")
+    assert_nil untrusted.dig("result", "findings", 0, "source")
+  end
+
   test "rejects executions from different scenarios" do
     baseline = execution(id: "main", sql_queries: 14)
     candidate = execution(id: "candidate", sql_queries: 14).merge("scenario_id" => "other")

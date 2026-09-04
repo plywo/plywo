@@ -15,7 +15,8 @@ class PlywoSubjectCapture
 
     execution_id = SecureRandom.uuid
     response = nil
-    measurements = Plywo::Rails::EvidenceCollector.capture(execution_id:) do
+    collector = Plywo::Rails::EvidenceCollector.new(execution_id:)
+    measurements = collector.capture do
       response = request.post(path, headers(execution_id:, subject:))
     end
     passed = response.status.between?(200, 299)
@@ -32,7 +33,8 @@ class PlywoSubjectCapture
       "status" => passed ? "passed" : "failed",
       "http_status" => response.status,
       "correlation_confirmed" => response["X-Plywo-Execution-Id"] == execution_id,
-      "measurements" => measurements
+      "measurements" => measurements,
+      "attributions" => collector.respond_to?(:attributions) ? collector.attributions : {}
     }
 
     File.write(ENV.fetch("PLYWO_OUTPUT"), JSON.pretty_generate(payload))

@@ -12,23 +12,41 @@ class PlywoGithubCheckRendererTest < ActiveSupport::TestCase
     assert_equal "No behavioral regression detected", rendered.fetch("title")
     assert_includes rendered.fetch("summary"), "**ALLOW**"
     assert_includes rendered.fetch("summary"), "[Open execution](https://github.com/plywo/plywo/actions/runs/1)"
+    assert_empty rendered.fetch("annotations")
   end
 
-  test "maps a blocking regression to a failed GitHub check" do
-    rendered = Plywo::Github::CheckRenderer.call(payload: pair_payload(sql_queries: 18))
+  test "renders a source-localized annotation for a trusted finding" do
+    payload = pair_payload(
+      sql_queries: 18,
+      attributions: {
+        "sql_queries" => [
+          {
+            "path" => "app/controllers/demo/behavior_controller.rb",
+            "start_line" => 20,
+            "end_line" => 20,
+            "confidence" => "explicit"
+          }
+        ]
+      },
+      changed_paths: [ "app/controllers/demo/behavior_controller.rb" ]
+    )
+    rendered = Plywo::Github::CheckRenderer.call(payload:)
+    annotation = rendered.fetch("annotations").first
 
     assert_equal "failure", rendered.fetch("conclusion")
-    assert_equal "Behavioral regression detected", rendered.fetch("title")
-    assert_includes rendered.fetch("summary"), "DATABASE_QUERY_REGRESSION"
-    assert_includes rendered.fetch("summary"), "14 | 18"
+    assert_equal "app/controllers/demo/behavior_controller.rb", annotation.fetch("path")
+    assert_equal 20, annotation.fetch("start_line")
+    assert_equal "failure", annotation.fetch("annotation_level")
+    assert_includes annotation.fetch("message"), "14 to 18"
   end
 
   private
 
-  def pair_payload(sql_queries:)
+  def pair_payload(sql_queries:, attributions: {}, changed_paths: [])
     Plywo::ExecutionPair.call(
       baseline: execution(sql_queries: 14),
-      candidate: execution(sql_queries:)
+      candidate: execution(sql_queries:).merge("attributions" => attributions),
+      changed_paths:
     )
   end
 
