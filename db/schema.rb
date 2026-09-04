@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_04_211000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_04_214000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -98,5 +98,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_211000) do
     t.index ["outcome"], name: "index_plywo_executions_on_outcome"
     t.index ["status", "lease_expires_at"], name: "index_plywo_executions_on_status_and_lease_expires_at"
     t.index ["status"], name: "index_plywo_executions_on_status"
+  end
+
+  create_table "plywo_executor_requests", force: :cascade do |t|
+    t.string "claim_token"
+    t.datetime "created_at", null: false
+    t.datetime "finished_at"
+    t.string "idempotency_key", null: false
+    t.datetime "lease_expires_at"
+    t.jsonb "request_payload", default: {}, null: false
+    t.string "request_digest", null: false
+    t.jsonb "result", default: {}, null: false
+    t.datetime "started_at"
+    t.string "status", default: "processing", null: false
+    t.datetime "updated_at", null: false
+    t.index ["idempotency_key"], name: "index_plywo_executor_requests_on_idempotency_key", unique: true
+    t.index ["status", "lease_expires_at"], name: "index_plywo_executor_requests_on_status_and_lease_expires_at"
   end
 end
