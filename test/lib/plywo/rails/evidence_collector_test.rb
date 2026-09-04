@@ -51,7 +51,7 @@ class PlywoRailsEvidenceCollectorTest < ActiveSupport::TestCase
     collector = Plywo::Rails::EvidenceCollector.new(execution_id:)
     enqueue_line = nil
 
-    collector.capture do
+    measurements = collector.capture do
       Current.set(plywo_execution_id: execution_id) do
         enqueue_line = __LINE__ + 1
         DemoNotificationJob.perform_later(execution_id)
@@ -60,7 +60,7 @@ class PlywoRailsEvidenceCollectorTest < ActiveSupport::TestCase
 
     source = collector.attributions.fetch("background_jobs").first
 
-    assert_equal 1, collector.capture {}.fetch("background_jobs") if false
+    assert_equal 1, measurements.fetch("background_jobs")
     assert_equal "test/lib/plywo/rails/evidence_collector_test.rb", source.fetch("path")
     assert_equal enqueue_line, source.fetch("start_line")
     assert_equal enqueue_line, source.fetch("end_line")
