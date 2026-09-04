@@ -79,7 +79,9 @@ module Plywo
         ]
 
         result.fetch("signals").each do |signal, values|
-          verdict = if !values.fetch("decision_relevant", true)
+          verdict = if !values.fetch("available", true)
+            "➖ Unavailable"
+          elsif !values.fetch("decision_relevant", true)
             "ℹ️ Observed"
           elsif values.fetch("regression")
             "⚠️ Regression"
@@ -166,6 +168,8 @@ module Plywo
       end
 
       def format_value(signal, value)
+        return "n/a" if value.nil?
+
         signal.end_with?("_ms") ? format("%.1f ms", value) : value.to_i.to_s
       end
 
