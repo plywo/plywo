@@ -18,8 +18,9 @@ module Plywo
         end
       end
 
-      def initialize(root: Rails.root, command_runner: CommandRunner.new, fetch_repository: true)
+      def initialize(root: Rails.root, tool_root: root, command_runner: CommandRunner.new, fetch_repository: true)
         @root = Pathname(root).expand_path
+        @tool_root = Pathname(tool_root).expand_path
         @command_runner = command_runner
         @fetch_repository = fetch_repository
       end
@@ -131,7 +132,7 @@ module Plywo
 
         run!(
           env:,
-          command: [ RbConfig.ruby, @root.join("script", "plywo_capture_subject.rb").to_s ],
+          command: [ RbConfig.ruby, @tool_root.join("script", "plywo_capture_subject.rb").to_s ],
           chdir: root
         )
       end
