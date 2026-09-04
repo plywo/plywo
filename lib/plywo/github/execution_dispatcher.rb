@@ -15,6 +15,8 @@ module Plywo
         existing = PlywoExecution.find_by(execution_id:)
 
         if existing
+          return [ existing, true ] if existing.status == "queued"
+
           if existing.status == "failed"
             existing.update!(
               status: "queued",
@@ -41,7 +43,8 @@ module Plywo
 
         [ execution, true ]
       rescue ActiveRecord::RecordNotUnique
-        [ PlywoExecution.find_by!(execution_id:), false ]
+        execution = PlywoExecution.find_by!(execution_id:)
+        [ execution, execution.status == "queued" ]
       end
 
       private
