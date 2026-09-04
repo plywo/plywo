@@ -1,0 +1,101 @@
+require "digest"
+require "json"
+require "securerandom"
+
+class PlywoExecutorRequest < ApplicationRecord
+  Acquisition = Data.define(:state, :record, :claim_token)
+  DigestMismatch = Class.new(StandardError)
+
+  STATUSES = %w[processing completed].freeze
+  DEFAULT_LEASE_SECONDS = 2_400
+
+  validates :idempotency_key, :request_digest, :status, presence: true
+  validates :idempotency_key, uniqueness: true
+  validates :status, inclusion: { in: STATUSES }
+
+  def self.acquire!(idempotency_key:, request_payload:, now: Time.current, lease_seconds: DEFAULT_LEASE_SECONDS)
+    lease_seconds = Integer(lease_seconds)
+    raise ArgumentError, "Executor request lease must be positive" unless lease_seconds.positive?
+
+    request_digest = digest_for(request_payload)
+
+    loop do
+      if (record = find_by(idempotency_key:))
+        raise DigestMismatch, "Idempotency key was reused for a different executor request" if record.request_digest != request_digest
+        return Acquisition.new(state: :completed, record:, claim_token: nil) if record.status == "completed"
+
+        if record.lease_expires_at && record.lease_expires_at > now
+          return Acquisition.new(state: :in_progress, record:, claim_token: nil)
+        end
+
+        claim_token = SecureRandom.uuid
+        claimed = where(id: record.id, status: "processing")
+          .where("lease_expires_at IS NULL OR lease_expires_at <= ?", now)
+          .update_all(
+            claim_token:,
+            started_at: now,
+            lease_expires_at: now + lease_seconds.seconds,
+            updated_at: now
+          )
+
+        if claimed == 1
+          record.reload
+          return Acquisition.new(state: :execute, record:, claim_token:)
+        end
+
+        next
+      end
+
+      claim_token = SecureRandom.uuid
+      begin
+        record = create!(
+          idempotency_key:,
+          request_digest:,
+          status: "processing",
+          claim_token:,
+          request_payload:,
+          result: {},
+          started_at: now,
+          lease_expires_at: now + lease_seconds.seconds
+        )
+        return Acquisition.new(state: :execute, record:, claim_token:)
+      rescue ActiveRecord::RecordNotUnique
+        next
+      end
+    end
+  end
+
+  def complete_claim!(claim_token:, result_payload:, now: Time.current)
+    completed = self.class.where(id:, status: "processing", claim_token:)
+      .where("lease_expires_at > ?", now)
+      .update_all(
+        status: "completed",
+        result: result_payload,
+        claim_token: nil,
+        lease_expires_at: nil,
+        finished_at: now,
+        updated_at: now
+      )
+
+    reload if completed == 1
+    completed == 1
+  end
+
+  def self.digest_for(payload)
+    Digest::SHA256.hexdigest(JSON.generate(canonicalize(payload)))
+  end
+
+  def self.canonicalize(value)
+    case value
+    when Hash
+      value.each_with_object({}) do |(key, nested), output|
+        output[key.to_s] = canonicalize(nested)
+      end.sort.to_h
+    when Array
+      value.map { |nested| canonicalize(nested) }
+    else
+      value
+    end
+  end
+  private_class_method :canonicalize
+end

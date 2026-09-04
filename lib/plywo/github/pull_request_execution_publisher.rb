@@ -72,7 +72,7 @@ module Plywo
           name: @check_name,
           external_id: execution.execution_id,
           details_url: run_url,
-          conclusion: "action_required",
+          conclusion: "failure",
           title: "Plywo could not complete validation",
           summary:,
           annotations: []

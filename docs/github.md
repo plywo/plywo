@@ -31,12 +31,12 @@ block  -> failure
 Execution infrastructure is a separate outcome and must never be presented as a product regression:
 
 ```text
-infra_failure          -> action_required
+infra_failure          -> failure
 stale                  -> no publication for the stale execution
-manual_review_required -> stop and require an explicit human decision
+manual_review_required -> action_required
 ```
 
-An `INFRA_FAILURE` Check says that Plywo could not produce trustworthy behavioral evidence. The durable execution remains failed with `outcome=infra_failure` and may be re-run. A high or critical behavioral regression is not rerunnable as infrastructure and must not be silently accepted as a new baseline.
+An `INFRA_FAILURE` Check says that Plywo could not produce trustworthy behavioral evidence. The durable execution remains failed with `outcome=infra_failure` and may be re-run. It uses the failed Check conclusion so GitHub presents retry semantics instead of the manual `Resolve` flow reserved for `action_required`. A high or critical behavioral regression is not rerunnable as infrastructure and must not be silently accepted as a new baseline.
 
 The check uses the Plywo execution/run identity as `external_id`. For App-native executions, `check_run.rerequested` resolves that external ID back to the durable `PlywoExecution`. Plywo only requeues the check when the execution outcome is `infra_failure` and the PR still points at the exact recorded base and head. Each successful claim increments `attempt_count`; stale or behavioral outcomes are not re-run through the infrastructure retry path.
 
