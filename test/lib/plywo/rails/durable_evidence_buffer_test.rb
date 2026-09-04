@@ -1,5 +1,12 @@
 require "test_helper"
 
+class PlywoFailingEvidenceJob < ApplicationJob
+  def perform
+    ApplicationRecord.connection.select_value("SELECT 1")
+    raise "durable evidence proof failure"
+  end
+end
+
 class PlywoRailsDurableEvidenceBufferTest < ActiveSupport::TestCase
   setup do
     Current.reset
@@ -42,6 +49,31 @@ class PlywoRailsDurableEvidenceBufferTest < ActiveSupport::TestCase
     assert records.all? { |record| record.producer_id.present? }
     assert records.all? { |record| record.path == "app/jobs/demo_async_evidence_job.rb" }
     assert records.all? { |record| record.confidence == "runtime" }
+    assert_nil Current.plywo_execution_id
+  end
+
+  test "persists partial evidence and an error when the worker raises" do
+    execution_id = "failing-execution-123"
+    serialized_job = Current.set(
+      plywo_execution_id: execution_id,
+      plywo_run_id: "failing-run-456",
+      plywo_subject: "candidate"
+    ) do
+      PlywoFailingEvidenceJob.new.serialize
+    end
+
+    Current.reset
+    job = ActiveJob::Base.deserialize(serialized_job)
+
+    error = assert_raises(RuntimeError) { job.perform_now }
+    assert_equal "durable evidence proof failure", error.message
+
+    records = PlywoEvidenceEvent.where(execution_id:).order(:id).to_a
+
+    assert_equal %w[sql_queries errors], records.map(&:signal)
+    assert_equal "PlywoFailingEvidenceJob", records.first.producer_name
+    assert_equal "runtime", records.first.confidence
+    assert_equal({ "error_class" => "RuntimeError" }, records.last.payload)
     assert_nil Current.plywo_execution_id
   end
 end
