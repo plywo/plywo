@@ -43,36 +43,61 @@ module Plywo
           source = payload[:source] || {}
           now = Time.current
 
-          {
-            execution_id: payload.fetch(:execution_id).to_s,
-            run_id: payload[:run_id]&.to_s,
-            subject: payload[:subject]&.to_s,
-            signal: payload.fetch(:signal).to_s,
-            path: source[:path]&.to_s,
+          event_row(
+            execution_id: payload.fetch(:execution_id),
+            run_id: payload[:run_id],
+            subject: payload[:subject],
+            signal: payload.fetch(:signal),
+            path: source[:path],
             start_line: source[:start_line],
             end_line: source[:end_line],
-            confidence: source[:confidence]&.to_s,
+            confidence: source[:confidence],
             attributes: payload[:attributes] || {},
-            producer_kind: producer_kind.to_s,
-            producer_name: producer_name.to_s,
-            producer_id: producer_id&.to_s,
+            producer_kind:,
+            producer_name:,
+            producer_id:,
             occurred_at: payload[:occurred_at] || now,
-            created_at: now,
-            updated_at: now
-          }
+            now:
+          )
         end
 
         def error_attributes(execution_id:, producer_kind:, producer_name:, producer_id:, error:)
           now = Time.current
 
+          event_row(
+            execution_id:,
+            run_id: Current.plywo_run_id,
+            subject: Current.plywo_subject,
+            signal: "errors",
+            path: nil,
+            start_line: nil,
+            end_line: nil,
+            confidence: nil,
+            attributes: { "error_class" => error.class.name },
+            producer_kind:,
+            producer_name:,
+            producer_id:,
+            occurred_at: now,
+            now:
+          )
+        end
+
+        def event_row(execution_id:, run_id:, subject:, signal:, path:, start_line:, end_line:, confidence:,
+                      attributes:, producer_kind:, producer_name:, producer_id:, occurred_at:, now:)
           {
             execution_id: execution_id.to_s,
-            signal: "errors",
-            attributes: { "error_class" => error.class.name },
+            run_id: run_id&.to_s,
+            subject: subject&.to_s,
+            signal: signal.to_s,
+            path: path&.to_s,
+            start_line:,
+            end_line:,
+            confidence: confidence&.to_s,
+            attributes:,
             producer_kind: producer_kind.to_s,
             producer_name: producer_name.to_s,
             producer_id: producer_id&.to_s,
-            occurred_at: now,
+            occurred_at:,
             created_at: now,
             updated_at: now
           }
