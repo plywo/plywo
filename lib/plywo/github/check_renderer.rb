@@ -61,7 +61,9 @@ module Plywo
         lines.concat([ "", "| Signal | Baseline | Candidate | Change |", "| --- | ---: | ---: | ---: |" ])
 
         result.fetch("signals").each do |signal, values|
-          marker = if !values.fetch("decision_relevant", true)
+          marker = if !values.fetch("available", true)
+            " ➖"
+          elsif !values.fetch("decision_relevant", true)
             " ℹ️"
           elsif values.fetch("regression")
             " ⚠️"
@@ -133,6 +135,8 @@ module Plywo
       end
 
       def format_value(signal, value)
+        return "n/a" if value.nil?
+
         signal.end_with?("_ms") ? format("%.1f ms", value) : value.to_i.to_s
       end
 
