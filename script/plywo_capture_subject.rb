@@ -6,10 +6,13 @@ require "securerandom"
 
 require File.join(Dir.pwd, "config/environment")
 require File.expand_path("../lib/plywo/rails/test_queue_execution", __dir__)
+require File.expand_path("../lib/plywo/rails/execution_quiescence", __dir__)
 
 class PlywoSubjectCapture
   DEFAULT_PATH = "/__plywo/demo/behavior".freeze
   DEFAULT_SCENARIO_ID = "dogfood.git.behavior".freeze
+  DEFAULT_QUIESCENCE_TIMEOUT_SECONDS = 5.0
+  DEFAULT_QUIET_PERIOD_SECONDS = 0.05
 
   def call
     warm_runtime
@@ -26,6 +29,7 @@ class PlywoSubjectCapture
 
     Current.reset
     application_job_executions = Plywo::Rails::TestQueueExecution.drain(execution_id:)
+    quiescence = wait_for_quiescence(execution_id:)
 
     raise "Expected the application request to enqueue at least one correlated job" if application_job_executions.empty?
 
@@ -56,7 +60,9 @@ class PlywoSubjectCapture
       "lifecycle" => {
         "foreground_collector_closed_before_worker" => true,
         "current_cleared_before_worker" => true,
-        "worker_origin" => "application_enqueue"
+        "worker_origin" => "application_enqueue",
+        "completion_source" => "durable_work_ledger",
+        "quiescence" => quiescence
       }
     }
 
@@ -78,6 +84,14 @@ class PlywoSubjectCapture
     adapter = ActiveJob::Base.queue_adapter
     adapter.enqueued_jobs.clear if adapter.respond_to?(:enqueued_jobs)
     adapter.performed_jobs.clear if adapter.respond_to?(:performed_jobs)
+  end
+
+  def wait_for_quiescence(execution_id:)
+    Plywo::Rails::ExecutionQuiescence.wait(
+      execution_id:,
+      timeout_seconds: Float(ENV.fetch("PLYWO_QUIESCENCE_TIMEOUT_SECONDS", DEFAULT_QUIESCENCE_TIMEOUT_SECONDS)),
+      quiet_period_seconds: Float(ENV.fetch("PLYWO_QUIET_PERIOD_SECONDS", DEFAULT_QUIET_PERIOD_SECONDS))
+    )
   end
 
   def durable_observations(execution_id:)
