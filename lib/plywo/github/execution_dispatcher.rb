@@ -16,18 +16,7 @@ module Plywo
 
         if existing
           return [ existing, true ] if existing.status == "queued"
-
-          if existing.status == "failed"
-            existing.update!(
-              status: "queued",
-              decision: nil,
-              result: {},
-              failure: nil,
-              started_at: nil,
-              finished_at: nil
-            )
-            return [ existing, true ]
-          end
+          return [ existing, true ] if existing.requeue!
 
           return [ existing, false ]
         end

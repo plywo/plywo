@@ -78,20 +78,27 @@ class GithubWebhooksControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "records rerequested check runs as not implemented instead of leaving them accepted" do
+  test "persists and enqueues rerequested check runs" do
     with_webhook_secret do
       payload = JSON.generate(
         "action" => "rerequested",
         "installation" => { "id" => 158_885_061 },
-        "repository" => { "full_name" => "plywo/plywo" }
+        "repository" => { "full_name" => "plywo/plywo" },
+        "check_run" => {
+          "head_sha" => "head-sha",
+          "external_id" => "github-execution-123"
+        }
       )
 
-      post_signed_webhook(payload:, event: "check_run", delivery: "delivery-check-run-rerequested")
+      assert_enqueued_with(job: GithubCheckRunRerequestJob) do
+        post_signed_webhook(payload:, event: "check_run", delivery: "delivery-check-run-rerequested")
+      end
 
       assert_response :accepted
       delivery = GithubWebhookDelivery.find_by!(delivery_id: "delivery-check-run-rerequested")
-      assert_equal "ignored", delivery.status
-      assert_equal "rerun_not_implemented", delivery.failure
+      assert_equal "accepted", delivery.status
+      assert_equal "head-sha", delivery.head_sha
+      assert_equal "github-execution-123", delivery.external_id
     end
   end
 

@@ -32,11 +32,15 @@ class GithubPullRequestExecutionJob < ApplicationJob
       "Plywo GitHub execution completed execution_id=#{execution.execution_id.inspect} " \
       "repository=#{execution.context.fetch("repository").inspect} " \
       "pr=#{execution.context.fetch("pull_request_number").inspect} " \
-      "decision=#{execution.decision.inspect} check=#{publication.fetch(:check).inspect} " \
+      "decision=#{execution.decision.inspect} outcome=#{execution.outcome.inspect} " \
+      "attempt=#{execution.attempt_count.inspect} check=#{publication.fetch(:check).inspect} " \
       "comment=#{publication.fetch(:comment).inspect}"
     )
   rescue StandardError => error
-    execution&.fail!(error)
+    if execution
+      execution.fail!(error)
+      publish_infra_failure(execution:, error:)
+    end
     raise
   end
 
@@ -66,6 +70,24 @@ class GithubPullRequestExecutionJob < ApplicationJob
     execution.ignore!(reason)
     Rails.logger.info(
       "Plywo GitHub execution ignored execution_id=#{execution.execution_id.inspect} reason=#{reason.inspect}"
+    )
+  end
+
+  def publish_infra_failure(execution:, error:)
+    token = installation_token(execution:)
+    pull_request = current_pull_request(execution:, token: token.value)
+    return if stale_reason(execution:, pull_request:)
+
+    publication = execution_publisher(token: token.value).infra_failure(execution:, error:)
+    Rails.logger.info(
+      "Plywo GitHub execution infra failure execution_id=#{execution.execution_id.inspect} " \
+      "attempt=#{execution.attempt_count.inspect} check=#{publication.fetch(:check).inspect} " \
+      "comment=#{publication.fetch(:comment).inspect}"
+    )
+  rescue StandardError => publication_error
+    Rails.logger.error(
+      "Plywo GitHub infra failure publication failed execution_id=#{execution.execution_id.inspect} " \
+      "error=#{publication_error.class}"
     )
   end
 

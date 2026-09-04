@@ -23,7 +23,7 @@ module Plywo
         run_url = "https://github.com/#{repository}/pull/#{pr_number}"
         rendered = CheckRenderer.call(payload:, run_url:)
 
-        check_action = CheckPublisher.new(token: @token, api_url: @api_url).upsert(
+        check_action = check_publisher.upsert(
           repository:,
           head_sha: execution.candidate_sha,
           name: @check_name,
@@ -37,20 +37,10 @@ module Plywo
 
         markdown = CommentRenderer.markdown(
           payload:,
-          context: {
-            repository:,
-            pr_number:,
-            baseline_label: context.fetch("baseline_ref"),
-            baseline_sha: execution.baseline_sha,
-            candidate_label: context.fetch("candidate_ref"),
-            candidate_sha: execution.candidate_sha,
-            bootstrap_baseline: nil,
-            execution_mode: "Plywo Development App - exact Git worktrees + isolated PostgreSQL + Solid Queue",
-            run_url:
-          }
+          context: comment_context(execution:, repository:, pr_number:, run_url:)
         )
 
-        comment_action = CommentPublisher.new(token: @token, api_url: @api_url).upsert(
+        comment_action = comment_publisher.upsert(
           repository:,
           pr_number:,
           body: markdown,
@@ -59,6 +49,81 @@ module Plywo
         )
 
         { check: check_action, comment: comment_action }
+      end
+
+      def infra_failure(execution:, error:)
+        context = execution.context
+        repository = context.fetch("repository")
+        pr_number = Integer(context.fetch("pull_request_number"))
+        run_url = "https://github.com/#{repository}/pull/#{pr_number}"
+        summary = <<~MARKDOWN.strip
+          **INFRA_FAILURE** - Plywo could not complete this validation.
+
+          This is an execution infrastructure failure, **not a product regression**. It is safe to re-run the check after the infrastructure issue is resolved.
+
+          Execution: `#{execution.execution_id}`<br>
+          Failure class: `#{error.class}`
+        MARKDOWN
+
+        check_action = check_publisher.upsert(
+          repository:,
+          head_sha: execution.candidate_sha,
+          name: @check_name,
+          external_id: execution.execution_id,
+          details_url: run_url,
+          conclusion: "action_required",
+          title: "Plywo could not complete validation",
+          summary:,
+          annotations: []
+        )
+
+        markdown = <<~MARKDOWN
+          <!-- plywo:behavioral-diff:v1 -->
+          ## 🟣 Plywo · Execution Problem
+
+          > [!WARNING]
+          > **Plywo could not complete validation.** This is an **INFRA_FAILURE**, not a product regression.
+
+          The check can be re-run after the execution infrastructure is healthy.
+
+          Run: `#{execution.execution_id}`<br>
+          Candidate: `#{execution.candidate_sha.first(8)}`<br>
+          Failure class: `#{error.class}`
+        MARKDOWN
+
+        comment_action = comment_publisher.upsert(
+          repository:,
+          pr_number:,
+          body: markdown,
+          author: @bot_login,
+          expected_head_sha: execution.candidate_sha
+        )
+
+        { check: check_action, comment: comment_action }
+      end
+
+      private
+
+      def check_publisher
+        CheckPublisher.new(token: @token, api_url: @api_url)
+      end
+
+      def comment_publisher
+        CommentPublisher.new(token: @token, api_url: @api_url)
+      end
+
+      def comment_context(execution:, repository:, pr_number:, run_url:)
+        {
+          repository:,
+          pr_number:,
+          baseline_label: execution.context.fetch("baseline_ref"),
+          baseline_sha: execution.baseline_sha,
+          candidate_label: execution.context.fetch("candidate_ref"),
+          candidate_sha: execution.candidate_sha,
+          bootstrap_baseline: nil,
+          execution_mode: "Plywo Development App - exact Git worktrees + isolated PostgreSQL + Solid Queue",
+          run_url:
+        }
       end
     end
   end
