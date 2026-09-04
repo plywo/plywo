@@ -1,5 +1,5 @@
 class GithubPullRequestExecutionLeaseExpiryJob < ApplicationJob
-  queue_as :default
+  queue_as :control
 
   LEASE_ERROR_CLASS = "Plywo::Executor::LeaseExpired".freeze
   LEASE_FAILURE_PREFIX = "#{LEASE_ERROR_CLASS}:".freeze
