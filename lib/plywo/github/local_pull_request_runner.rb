@@ -146,7 +146,8 @@ module Plywo
           "PLYWO_SOLID_QUEUE_DIAGNOSTICS" => "1",
           "PLYWO_SOLID_QUEUE_START_TIMEOUT_SECONDS" => "30",
           "PLYWO_QUIESCENCE_TIMEOUT_SECONDS" => "30",
-          "SOLID_QUEUE_SKIP_RECURRING" => "true"
+          "SOLID_QUEUE_SKIP_RECURRING" => "true",
+          "SOLID_QUEUE_SUPERVISOR_MODE" => "async"
         }
       end
 
