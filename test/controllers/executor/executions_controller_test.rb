@@ -73,6 +73,49 @@ class ExecutorExecutionsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "accepts cancellation before request arrival and rejects later execution" do
+    with_executor_service_env do
+      post_cancel(reason: "superseded")
+
+      assert_response :accepted
+      assert_equal "cancelled", response.parsed_body.fetch("status")
+      record = PlywoExecutorRequest.find_by!(idempotency_key: "github-123:1")
+      assert_equal "cancelled", record.status
+      assert_equal "superseded", record.cancellation_reason
+
+      post_executor(request_payload, idempotency_key: "github-123:1")
+
+      assert_response :conflict
+      assert_equal "Executor request was cancelled", response.parsed_body.fetch("error")
+    end
+  end
+
+  test "cancellation is idempotent but cannot replace a completed result" do
+    with_executor_service_env do
+      post_cancel(reason: "first")
+      assert_response :accepted
+      post_cancel(reason: "second")
+      assert_response :accepted
+
+      PlywoExecutorRequest.delete_all
+      result = Plywo::Executor::Result.success(result_payload)
+      acquisition = PlywoExecutorRequest.acquire!(
+        idempotency_key: "github-123:1",
+        request_payload: request_payload,
+        lease_seconds: 60
+      )
+      acquisition.record.complete_claim!(
+        claim_token: acquisition.claim_token,
+        result_payload: result.to_h
+      )
+
+      post_cancel(reason: "too-late")
+
+      assert_response :conflict
+      assert_equal "Executor request already completed", response.parsed_body.fetch("error")
+    end
+  end
+
   private
 
   def with_executor_service_env
@@ -94,6 +137,12 @@ class ExecutorExecutionsControllerTest < ActionDispatch::IntegrationTest
     post executor_service_executions_url,
       params: JSON.generate(payload),
       headers: authenticated_headers.merge("Idempotency-Key" => idempotency_key)
+  end
+
+  def post_cancel(reason:)
+    post cancel_executor_service_execution_url(execution_id: "github-123", attempt_number: 1),
+      params: JSON.generate("reason" => reason),
+      headers: authenticated_headers
   end
 
   def authenticated_headers
