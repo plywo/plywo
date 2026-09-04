@@ -10,7 +10,7 @@ module Plywo
         return nil if value.empty?
 
         scheme, token = value.split(" ", 2)
-        unless scheme == "Bearer" && token.present?
+        unless scheme == "Bearer" && token && !token.empty?
           raise ArgumentError, "Invalid repository capability authorization"
         end
 
