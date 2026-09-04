@@ -1,5 +1,7 @@
 module Plywo
   class ExecutionPair
+    TRUSTED_SOURCE_CONFIDENCE = %w[explicit runtime].freeze
+
     def self.call(baseline:, candidate:, changed_paths: [])
       new(baseline:, candidate:, changed_paths:).call
     end
@@ -45,7 +47,8 @@ module Plywo
       result.fetch("findings").each do |finding|
         locations = attributions.fetch(finding.fetch("signal"), [])
         source = locations.find do |location|
-          location.fetch("confidence", nil) == "explicit" && @changed_paths.include?(location.fetch("path", nil))
+          TRUSTED_SOURCE_CONFIDENCE.include?(location.fetch("confidence", nil)) &&
+            @changed_paths.include?(location.fetch("path", nil))
         end
         finding["source"] = source if source
       end
