@@ -47,7 +47,7 @@ class PlywoExecutorHttpAdapterTest < ActiveSupport::TestCase
     assert_equal executor_request.to_h, JSON.parse(call.fetch(:body))
   end
 
-  test "posts cancellation for the exact execution attempt" do
+  test "posts cancellation for the exact execution attempt with a bounded control timeout" do
     transport = recording_transport(status: 202, body: JSON.generate("status" => "cancelled"))
 
     result = adapter(transport:).cancel(
@@ -62,6 +62,7 @@ class PlywoExecutorHttpAdapterTest < ActiveSupport::TestCase
     assert_equal "Bearer remote-secret", call.fetch(:headers).fetch("Authorization")
     refute_includes call.fetch(:headers), "Idempotency-Key"
     assert_equal({ "reason" => "superseded" }, JSON.parse(call.fetch(:body)))
+    assert_equal 30, call.fetch(:read_timeout)
   end
 
   test "fails cancellation when the remote executor rejects it" do
