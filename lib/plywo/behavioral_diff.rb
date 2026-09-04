@@ -1,3 +1,4 @@
+require_relative "async_diagnosis"
 require_relative "runtime_diagnosis"
 
 module Plywo
@@ -14,6 +15,13 @@ module Plywo
         reason_code: "CPU_TIME_REGRESSION",
         threshold_percent: 30.0,
         threshold_absolute: 10.0,
+        severity: "medium",
+        optional: true
+      },
+      "queue_wait_ms" => {
+        reason_code: "QUEUE_WAIT_REGRESSION",
+        threshold_percent: 20.0,
+        threshold_absolute: 20.0,
         severity: "medium",
         optional: true
       },
@@ -166,6 +174,10 @@ module Plywo
           wall: signals.fetch("duration_ms"),
           thread_cpu: signals.fetch("thread_cpu_ms")
         ),
+        "async" => async_scope_diagnosis(
+          queue_wait: signals.fetch("queue_wait_ms"),
+          worker_wall: signals.fetch("worker_wall_ms")
+        ),
         "worker" => runtime_scope_diagnosis(
           wall: signals.fetch("worker_wall_ms"),
           thread_cpu: signals.fetch("worker_thread_cpu_ms")
@@ -180,6 +192,13 @@ module Plywo
       }
     end
 
+    def async_scope_diagnosis(queue_wait:, worker_wall:)
+      {
+        "baseline" => async_profile(queue_wait, worker_wall, "baseline"),
+        "candidate" => async_profile(queue_wait, worker_wall, "candidate")
+      }
+    end
+
     def runtime_profile(wall, thread_cpu, side)
       return RuntimeDiagnosis.call(wall_ms: nil, thread_cpu_ms: nil) unless wall.fetch("available", true) && thread_cpu.fetch("available", true)
 
@@ -187,6 +206,15 @@ module Plywo
         wall_ms: wall[side],
         thread_cpu_ms: thread_cpu[side]
       ).slice("classification", "cpu_ratio_percent")
+    end
+
+    def async_profile(queue_wait, worker_wall, side)
+      return AsyncDiagnosis.call(queue_wait_ms: nil, worker_wall_ms: nil) unless queue_wait.fetch("available", true) && worker_wall.fetch("available", true)
+
+      AsyncDiagnosis.call(
+        queue_wait_ms: queue_wait[side],
+        worker_wall_ms: worker_wall[side]
+      ).slice("classification", "queue_share_percent")
     end
 
     def block_merge?(findings)

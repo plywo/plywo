@@ -6,6 +6,7 @@ module Plywo
         "duration_ms" => "Request wall time",
         "process_cpu_ms" => "Request process CPU",
         "thread_cpu_ms" => "Request thread CPU",
+        "queue_wait_ms" => "Queue wait (max job)",
         "worker_wall_ms" => "Worker wall time",
         "worker_process_cpu_ms" => "Worker process CPU",
         "worker_thread_cpu_ms" => "Worker thread CPU",
@@ -109,6 +110,19 @@ module Plywo
           lines << "| #{scope.capitalize} | #{runtime_classification(baseline)} | #{runtime_classification(candidate)} | " \
             "#{format_ratio(candidate.fetch("cpu_ratio_percent"))} |"
         end
+
+        if (async_profile = diagnosis["async"])
+          baseline = async_profile.fetch("baseline")
+          candidate = async_profile.fetch("candidate")
+          lines.concat([
+            "",
+            "| Async stage | Baseline | Candidate | Candidate queue share |",
+            "| --- | --- | --- | ---: |",
+            "| Queue → worker | #{runtime_classification(baseline)} | #{runtime_classification(candidate)} | " \
+              "#{format_ratio(candidate.fetch("queue_share_percent"))} |"
+          ])
+        end
+
         lines << ""
         lines
       end

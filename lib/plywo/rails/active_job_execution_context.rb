@@ -58,7 +58,8 @@ module Plywo
         execution_id = Current.plywo_execution_id
         return yield if execution_id.nil?
 
-        ExecutionWorkLifecycle.running(self)
+        work_item = ExecutionWorkLifecycle.running(self)
+        record_plywo_queue_wait(work_item)
         result = DurableEvidenceBuffer.capture(
           execution_id:,
           producer_kind: "active_job",
@@ -70,6 +71,21 @@ module Plywo
       rescue StandardError => error
         ExecutionWorkLifecycle.failed(self, error:)
         raise
+      end
+
+      def record_plywo_queue_wait(work_item)
+        return unless work_item&.enqueued_at && work_item.started_at
+
+        queue_wait_ms = ((work_item.started_at - work_item.enqueued_at) * 1000).round(1)
+        DurableEvidenceBuffer.record_runtime_metric(
+          execution_id: Current.plywo_execution_id,
+          signal: "queue_wait_ms",
+          value: queue_wait_ms,
+          producer_kind: "active_job",
+          producer_name: self.class.name,
+          producer_id: job_id,
+          attributes: { semantics: "enqueue_to_start" }
+        )
       end
     end
   end

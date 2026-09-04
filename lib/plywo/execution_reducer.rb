@@ -1,9 +1,11 @@
+require_relative "async_diagnosis"
 require_relative "runtime_diagnosis"
 
 module Plywo
   class ExecutionReducer
     COUNTABLE_SIGNALS = %w[sql_queries background_jobs emails http_requests errors].freeze
     SUMMABLE_RUNTIME_SIGNALS = %w[worker_wall_ms worker_process_cpu_ms worker_thread_cpu_ms].freeze
+    MAX_RUNTIME_SIGNALS = %w[queue_wait_ms].freeze
 
     def self.call(execution:)
       new(execution:).call
@@ -48,6 +50,10 @@ module Plywo
       elsif SUMMABLE_RUNTIME_SIGNALS.include?(signal)
         value = numeric_runtime_value(observation)
         measurements[signal] = measurements.fetch(signal, 0).to_f + value if value
+      elsif MAX_RUNTIME_SIGNALS.include?(signal)
+        value = numeric_runtime_value(observation)
+        current = measurements[signal]
+        measurements[signal] = value if value && (current.nil? || value > current.to_f)
       end
     end
 
@@ -80,7 +86,7 @@ module Plywo
       measurements.each do |signal, value|
         if COUNTABLE_SIGNALS.include?(signal) && value.is_a?(Float) && value.to_i == value
           measurements[signal] = value.to_i
-        elsif SUMMABLE_RUNTIME_SIGNALS.include?(signal)
+        elsif (SUMMABLE_RUNTIME_SIGNALS + MAX_RUNTIME_SIGNALS).include?(signal)
           measurements[signal] = value.to_f.round(1)
         end
       end
@@ -91,6 +97,10 @@ module Plywo
         "request" => RuntimeDiagnosis.call(
           wall_ms: measurements["duration_ms"],
           thread_cpu_ms: measurements["thread_cpu_ms"]
+        ),
+        "async" => AsyncDiagnosis.call(
+          queue_wait_ms: measurements["queue_wait_ms"],
+          worker_wall_ms: measurements["worker_wall_ms"]
         ),
         "worker" => RuntimeDiagnosis.call(
           wall_ms: measurements["worker_wall_ms"],
