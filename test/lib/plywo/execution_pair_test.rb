@@ -15,19 +15,12 @@ class PlywoExecutionPairTest < ActiveSupport::TestCase
     assert_equal "block", payload.dig("result", "merge_recommendation")
   end
 
-  test "attaches trusted explicit or runtime sources only when the path changed" do
+  test "attaches trusted explicit or unambiguous runtime sources only when the path changed" do
     %w[explicit runtime].each do |confidence|
       baseline = execution(id: "main", sql_queries: 14)
       candidate = execution(id: "candidate", sql_queries: 19).merge(
         "attributions" => {
-          "sql_queries" => [
-            {
-              "path" => "app/controllers/demo/behavior_controller.rb",
-              "start_line" => 20,
-              "end_line" => 20,
-              "confidence" => confidence
-            }
-          ]
+          "sql_queries" => [source(confidence:)]
         }
       )
 
@@ -47,18 +40,53 @@ class PlywoExecutionPairTest < ActiveSupport::TestCase
     end
   end
 
-  test "rejects inferred source confidence" do
+  test "prefers explicit attribution when runtime attribution is ambiguous" do
     baseline = execution(id: "main", sql_queries: 14)
     candidate = execution(id: "candidate", sql_queries: 19).merge(
       "attributions" => {
         "sql_queries" => [
-          {
-            "path" => "app/controllers/demo/behavior_controller.rb",
-            "start_line" => 20,
-            "end_line" => 20,
-            "confidence" => "inferred"
-          }
+          source(confidence: "runtime"),
+          source(confidence: "runtime", line: 30),
+          source(confidence: "explicit", line: 40)
         ]
+      }
+    )
+
+    payload = Plywo::ExecutionPair.call(
+      baseline:,
+      candidate:,
+      changed_paths: [ "app/controllers/demo/behavior_controller.rb" ]
+    )
+
+    assert_equal 40, payload.dig("result", "findings", 0, "source", "start_line")
+    assert_equal "explicit", payload.dig("result", "findings", 0, "source", "confidence")
+  end
+
+  test "does not localize an ambiguous runtime source" do
+    baseline = execution(id: "main", sql_queries: 14)
+    candidate = execution(id: "candidate", sql_queries: 19).merge(
+      "attributions" => {
+        "sql_queries" => [
+          source(confidence: "runtime"),
+          source(confidence: "runtime", line: 30)
+        ]
+      }
+    )
+
+    payload = Plywo::ExecutionPair.call(
+      baseline:,
+      candidate:,
+      changed_paths: [ "app/controllers/demo/behavior_controller.rb" ]
+    )
+
+    assert_nil payload.dig("result", "findings", 0, "source")
+  end
+
+  test "rejects inferred source confidence" do
+    baseline = execution(id: "main", sql_queries: 14)
+    candidate = execution(id: "candidate", sql_queries: 19).merge(
+      "attributions" => {
+        "sql_queries" => [source(confidence: "inferred")]
       }
     )
 
@@ -83,6 +111,15 @@ class PlywoExecutionPairTest < ActiveSupport::TestCase
   end
 
   private
+
+  def source(confidence:, line: 20)
+    {
+      "path" => "app/controllers/demo/behavior_controller.rb",
+      "start_line" => line,
+      "end_line" => line,
+      "confidence" => confidence
+    }
+  end
 
   def execution(id:, sql_queries:)
     {
