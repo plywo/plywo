@@ -8,6 +8,7 @@ class PlywoRailsEvidenceCollectorTest < ActiveSupport::TestCase
       Current.set(plywo_execution_id: execution_id) do
         ActiveSupport::Notifications.instrument("sql.active_record", name: "Demo SQL", cached: false)
         ActiveSupport::Notifications.instrument("enqueue.active_job")
+        ActiveSupport::Notifications.instrument(Plywo::Rails::NetHttpInstrumentation::EVENT_NAME)
         ActiveSupport::Notifications.instrument("process_action.action_controller", status: 200)
         Plywo::Rails::Evidence.side_effect(:email)
       end
@@ -15,6 +16,7 @@ class PlywoRailsEvidenceCollectorTest < ActiveSupport::TestCase
       Current.set(plywo_execution_id: "another-execution") do
         ActiveSupport::Notifications.instrument("sql.active_record", name: "Other SQL", cached: false)
         ActiveSupport::Notifications.instrument("enqueue.active_job")
+        ActiveSupport::Notifications.instrument(Plywo::Rails::NetHttpInstrumentation::EVENT_NAME)
       end
     end
 
@@ -85,6 +87,27 @@ class PlywoRailsEvidenceCollectorTest < ActiveSupport::TestCase
     assert_equal "test/lib/plywo/rails/evidence_collector_test.rb", source.fetch("path")
     assert_equal delivery_line, source.fetch("start_line")
     assert_equal delivery_line, source.fetch("end_line")
+    assert_equal "runtime", source.fetch("confidence")
+  end
+
+  test "captures the project callsite for a real outbound HTTP request" do
+    execution_id = "execution-with-http-source"
+    collector = Plywo::Rails::EvidenceCollector.new(execution_id:)
+    request_line = nil
+
+    measurements = collector.capture do
+      Current.set(plywo_execution_id: execution_id) do
+        request_line = __LINE__ + 1
+        Net::HTTP.get(URI.parse(Plywo::Demo::LoopbackHttpServer.url))
+      end
+    end
+
+    source = collector.attributions.fetch("http_requests").first
+
+    assert_equal 1, measurements.fetch("http_requests")
+    assert_equal "test/lib/plywo/rails/evidence_collector_test.rb", source.fetch("path")
+    assert_equal request_line, source.fetch("start_line")
+    assert_equal request_line, source.fetch("end_line")
     assert_equal "runtime", source.fetch("confidence")
   end
 end
