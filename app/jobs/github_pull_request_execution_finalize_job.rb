@@ -3,7 +3,13 @@ class GithubPullRequestExecutionFinalizeJob < ApplicationJob
 
   def perform(execution_id, result_payload)
     execution = PlywoExecution.find_by!(execution_id:)
-    return unless execution.status == "running"
+    unless execution.renew_lease!
+      Rails.logger.info(
+        "Plywo GitHub executor result ignored execution_id=#{execution.execution_id.inspect} " \
+        "reason=lease_expired_or_terminal"
+      )
+      return
+    end
 
     result = Plywo::Executor::Result.from_h(result_payload)
     token = installation_token(execution:)
