@@ -43,6 +43,26 @@ class PlywoExecutionTest < ActiveSupport::TestCase
     refute execution.expire_lease!(now: now + 121)
   end
 
+  test "cancels only the exact active attempt without classifying infrastructure failure" do
+    execution = create_execution
+    now = Time.utc(2026, 9, 5, 0, 45, 0)
+    execution.claim!(now:, lease_seconds: 120)
+
+    refute execution.cancel!(attempt_number: 2, reason: "user_cancelled", now: now + 10)
+    assert execution.cancel!(attempt_number: 1, reason: "user_cancelled", now: now + 10)
+
+    execution.reload
+    assert_equal "cancelled", execution.status
+    assert_equal "cancelled", execution.outcome
+    assert_equal "user_cancelled", execution.cancellation_reason
+    assert_equal now + 10, execution.cancelled_at
+    assert_equal now + 10, execution.finished_at
+    assert_nil execution.lease_expires_at
+    assert_nil execution.failure
+    refute execution.rerunnable?
+    refute execution.cancel!(attempt_number: 1, reason: "again", now: now + 11)
+  end
+
   test "stores the behavioral outcome on completion and closes the lease" do
     execution = create_execution
     execution.claim!
