@@ -40,15 +40,20 @@ module Plywo
     end
 
     def attach_trusted_sources!(result)
-      attributions = @candidate.fetch("attributions", {})
+      candidate_attributions = @candidate.fetch("attributions", {})
+      baseline_attributions = @baseline.fetch("attributions", {})
 
       result.fetch("findings").each do |finding|
-        source = trusted_source(attributions.fetch(finding.fetch("signal"), []))
+        signal = finding.fetch("signal")
+        source = trusted_source(
+          candidate_attributions.fetch(signal, []),
+          baseline_attributions.fetch(signal, [])
+        )
         finding["source"] = source if source
       end
     end
 
-    def trusted_source(locations)
+    def trusted_source(locations, baseline_locations)
       explicit = locations.find do |location|
         location["confidence"] == "explicit" && changed_path?(location)
       end
@@ -57,7 +62,18 @@ module Plywo
       runtime = locations.select do |location|
         location["confidence"] == "runtime" && changed_path?(location)
       end
-      runtime.one? ? runtime.first : nil
+      return runtime.first if runtime.one?
+
+      baseline_runtime = baseline_locations.select { |location| location["confidence"] == "runtime" }
+      candidate_only = runtime.reject do |location|
+        baseline_runtime.any? { |baseline_location| same_source?(location, baseline_location) }
+      end
+
+      candidate_only.one? ? candidate_only.first : nil
+    end
+
+    def same_source?(left, right)
+      %w[path start_line end_line confidence].all? { |key| left[key] == right[key] }
     end
 
     def changed_path?(location)
