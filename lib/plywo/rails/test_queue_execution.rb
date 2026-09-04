@@ -17,26 +17,32 @@ module Plywo
         Current.reset
 
         jobs.map do |job_data|
-          serialized = serialized_job(job_data)
-          context = serialized.fetch(ActiveJobExecutionContext::CONTEXT_KEY, {})
-
-          ActiveJob::Base.execute(serialized)
-
-          {
-            "job_class" => serialized.fetch("job_class"),
-            "job_id" => serialized.fetch("job_id"),
-            "queue_name" => serialized.fetch("queue_name"),
-            "execution_id" => context["plywo_execution_id"],
-            "run_id" => context["plywo_run_id"],
-            "subject" => context["plywo_subject"],
-            "source" => "application_enqueue"
-          }
-        ensure
-          Current.reset
+          execute(job_data)
         end
+      ensure
+        Current.reset
       end
 
       private
+
+      def execute(job_data)
+        serialized = serialized_job(job_data)
+        context = serialized.fetch(ActiveJobExecutionContext::CONTEXT_KEY, {})
+
+        ActiveJob::Base.execute(serialized)
+
+        {
+          "job_class" => serialized.fetch("job_class"),
+          "job_id" => serialized.fetch("job_id"),
+          "queue_name" => serialized.fetch("queue_name"),
+          "execution_id" => context["plywo_execution_id"],
+          "run_id" => context["plywo_run_id"],
+          "subject" => context["plywo_subject"],
+          "source" => "application_enqueue"
+        }
+      ensure
+        Current.reset
+      end
 
       def matching_jobs
         @adapter.enqueued_jobs.select do |job_data|
