@@ -6,7 +6,9 @@ module Plywo
 
       def self.included(base)
         base.around_perform do |job, block|
-          job.send(:with_plywo_execution_context, &block)
+          job.send(:with_plywo_execution_context) do
+            job.send(:capture_plywo_worker_evidence, &block)
+          end
         end
       end
 
@@ -39,6 +41,18 @@ module Plywo
         return yield if context.nil? || context.empty?
 
         Current.set(**context.transform_keys(&:to_sym)) { yield }
+      end
+
+      def capture_plywo_worker_evidence
+        execution_id = Current.plywo_execution_id
+        return yield if execution_id.nil?
+
+        DurableEvidenceBuffer.capture(
+          execution_id:,
+          producer_kind: "active_job",
+          producer_name: self.class.name,
+          producer_id: job_id
+        ) { yield }
       end
     end
   end
