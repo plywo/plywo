@@ -100,6 +100,18 @@ module Plywo
           candidate = profile.fetch("candidate")
           lines << "| #{scope.capitalize} | #{classification(baseline)} | #{classification(candidate)} | #{format_ratio(candidate.fetch("cpu_ratio_percent"))} |"
         end
+
+        if (async_profile = diagnosis["async"])
+          baseline = async_profile.fetch("baseline")
+          candidate = async_profile.fetch("candidate")
+          lines.concat([
+            "",
+            "| Async stage | Baseline | Candidate | Candidate queue share |",
+            "| --- | --- | --- | ---: |",
+            "| Queue → worker | #{classification(baseline)} | #{classification(candidate)} | #{format_ratio(candidate.fetch("queue_share_percent"))} |"
+          ])
+        end
+
         lines
       end
 
