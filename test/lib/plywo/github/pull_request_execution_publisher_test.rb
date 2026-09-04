@@ -56,11 +56,17 @@ class PlywoGithubPullRequestExecutionPublisherTest < ActiveSupport::TestCase
     )
 
     assert_equal({ check: :created, comment: :created }, result)
-    assert_equal "failure", check.calls.one.fetch(:conclusion)
-    assert_equal "github-execution", check.calls.one.fetch(:external_id)
-    assert_match "INFRA_FAILURE", check.calls.one.fetch(:summary)
-    assert_match "not a product regression", check.calls.one.fetch(:summary)
-    assert_match "INFRA_FAILURE", comment.calls.one.fetch(:body)
+    assert_equal 1, check.calls.size
+    assert_equal 1, comment.calls.size
+
+    check_call = check.calls.first
+    comment_call = comment.calls.first
+
+    assert_equal "failure", check_call.fetch(:conclusion)
+    assert_equal "github-execution", check_call.fetch(:external_id)
+    assert_match "INFRA_FAILURE", check_call.fetch(:summary)
+    assert_match "not a product regression", check_call.fetch(:summary)
+    assert_match "INFRA_FAILURE", comment_call.fetch(:body)
   end
 
   private
