@@ -1,3 +1,4 @@
+require_relative "async_diagnosis"
 require_relative "runtime_diagnosis"
 
 module Plywo
@@ -96,6 +97,10 @@ module Plywo
         "request" => RuntimeDiagnosis.call(
           wall_ms: measurements["duration_ms"],
           thread_cpu_ms: measurements["thread_cpu_ms"]
+        ),
+        "async" => AsyncDiagnosis.call(
+          queue_wait_ms: measurements["queue_wait_ms"],
+          worker_wall_ms: measurements["worker_wall_ms"]
         ),
         "worker" => RuntimeDiagnosis.call(
           wall_ms: measurements["worker_wall_ms"],
