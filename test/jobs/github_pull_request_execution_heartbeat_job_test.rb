@@ -41,6 +41,20 @@ class GithubPullRequestExecutionHeartbeatJobTest < ActiveJob::TestCase
     end
   end
 
+  test "stops after cancellation" do
+    now = Time.utc(2026, 9, 5, 0, 30, 0)
+    execution = create_running_execution(now:)
+    execution.cancel!(attempt_number: execution.attempt_count, reason: "superseded", now: now + 5)
+
+    assert_no_enqueued_jobs only: GithubPullRequestExecutionHeartbeatJob do
+      GithubPullRequestExecutionHeartbeatJob.perform_now(execution.execution_id, execution.attempt_count)
+    end
+
+    execution.reload
+    assert_equal "cancelled", execution.status
+    assert_equal "cancelled", execution.outcome
+  end
+
   private
 
   def create_running_execution(now:)
