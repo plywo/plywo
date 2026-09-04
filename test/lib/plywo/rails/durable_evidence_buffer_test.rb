@@ -19,11 +19,13 @@ class PlywoRailsDurableEvidenceBufferTest < ActiveSupport::TestCase
   setup do
     Current.reset
     PlywoEvidenceEvent.delete_all
+    PlywoExecutionWorkItem.delete_all
   end
 
   teardown do
     Current.reset
     PlywoEvidenceEvent.delete_all
+    PlywoExecutionWorkItem.delete_all
   end
 
   test "persists worker evidence after the originating collector has closed" do
@@ -45,7 +47,8 @@ class PlywoRailsDurableEvidenceBufferTest < ActiveSupport::TestCase
     Current.reset
     assert_nil Current.plywo_execution_id
 
-    ActiveJob::Base.deserialize(serialized_job).perform_now
+    job = ActiveJob::Base.deserialize(serialized_job)
+    job.perform_now
 
     records = PlywoEvidenceEvent.where(execution_id:).order(:id).to_a
 
@@ -57,10 +60,15 @@ class PlywoRailsDurableEvidenceBufferTest < ActiveSupport::TestCase
     assert records.all? { |record| record.producer_id.present? }
     assert records.all? { |record| record.path == "test/lib/plywo/rails/durable_evidence_buffer_test.rb" }
     assert records.all? { |record| record.confidence == "runtime" }
+
+    work_item = PlywoExecutionWorkItem.find_by!(execution_id:, work_id: job.job_id)
+    assert_equal "completed", work_item.status
+    assert work_item.terminal?
+    assert Plywo::Rails::ExecutionWorkLifecycle.quiescent?(execution_id:)
     assert_nil Current.plywo_execution_id
   end
 
-  test "persists partial evidence and an error when the worker raises" do
+  test "persists partial evidence and marks work failed when the worker raises" do
     execution_id = "failing-execution-123"
     serialized_job = Current.set(
       plywo_execution_id: execution_id,
@@ -82,6 +90,14 @@ class PlywoRailsDurableEvidenceBufferTest < ActiveSupport::TestCase
     assert_equal "PlywoFailingEvidenceJob", records.first.producer_name
     assert_equal "runtime", records.first.confidence
     assert_equal({ "error_class" => "RuntimeError" }, records.last.payload)
+
+    work_item = PlywoExecutionWorkItem.find_by!(execution_id:, work_id: job.job_id)
+    assert_equal "failed", work_item.status
+    assert_equal "RuntimeError", work_item.error_class
+    assert_not_nil work_item.started_at
+    assert_not_nil work_item.finished_at
+    assert work_item.terminal?
+    assert Plywo::Rails::ExecutionWorkLifecycle.quiescent?(execution_id:)
     assert_nil Current.plywo_execution_id
   end
 end
