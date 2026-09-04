@@ -16,6 +16,8 @@ class PlywoFailingEvidenceJob < ApplicationJob
 end
 
 class PlywoRailsDurableEvidenceBufferTest < ActiveSupport::TestCase
+  RUNTIME_SIGNALS = %w[worker_wall_ms worker_process_cpu_ms worker_thread_cpu_ms].freeze
+
   setup do
     Current.reset
     PlywoEvidenceEvent.delete_all
@@ -51,15 +53,20 @@ class PlywoRailsDurableEvidenceBufferTest < ActiveSupport::TestCase
     job.perform_now
 
     records = PlywoEvidenceEvent.where(execution_id:).order(:id).to_a
+    product_records = records.reject { |record| RUNTIME_SIGNALS.include?(record.signal) }
+    runtime_records = records.select { |record| RUNTIME_SIGNALS.include?(record.signal) }
 
-    assert_equal %w[sql_queries emails http_requests], records.map(&:signal)
+    assert_equal %w[sql_queries emails http_requests], product_records.map(&:signal)
+    assert_equal RUNTIME_SIGNALS, runtime_records.map(&:signal)
     assert records.all? { |record| record.run_id == run_id }
     assert records.all? { |record| record.subject == "candidate" }
     assert records.all? { |record| record.producer_kind == "active_job" }
     assert records.all? { |record| record.producer_name == "PlywoDurableEvidenceProbeJob" }
     assert records.all? { |record| record.producer_id.present? }
-    assert records.all? { |record| record.path == "test/lib/plywo/rails/durable_evidence_buffer_test.rb" }
-    assert records.all? { |record| record.confidence == "runtime" }
+    assert product_records.all? { |record| record.path == "test/lib/plywo/rails/durable_evidence_buffer_test.rb" }
+    assert product_records.all? { |record| record.confidence == "runtime" }
+    assert runtime_records.all? { |record| record.payload.fetch("value") >= 0.0 }
+    assert runtime_records.all? { |record| record.confidence == "runtime" }
 
     work_item = PlywoExecutionWorkItem.find_by!(execution_id:, work_id: job.job_id)
     assert_equal "completed", work_item.status
@@ -68,7 +75,7 @@ class PlywoRailsDurableEvidenceBufferTest < ActiveSupport::TestCase
     assert_nil Current.plywo_execution_id
   end
 
-  test "persists partial evidence and marks work failed when the worker raises" do
+  test "persists partial evidence, runtime probes and marks work failed when the worker raises" do
     execution_id = "failing-execution-123"
     serialized_job = Current.set(
       plywo_execution_id: execution_id,
@@ -85,11 +92,15 @@ class PlywoRailsDurableEvidenceBufferTest < ActiveSupport::TestCase
     assert_equal "durable evidence proof failure", error.message
 
     records = PlywoEvidenceEvent.where(execution_id:).order(:id).to_a
+    product_records = records.reject { |record| RUNTIME_SIGNALS.include?(record.signal) }
+    runtime_records = records.select { |record| RUNTIME_SIGNALS.include?(record.signal) }
 
-    assert_equal %w[sql_queries errors], records.map(&:signal)
-    assert_equal "PlywoFailingEvidenceJob", records.first.producer_name
-    assert_equal "runtime", records.first.confidence
-    assert_equal({ "error_class" => "RuntimeError" }, records.last.payload)
+    assert_equal %w[sql_queries errors], product_records.map(&:signal)
+    assert_equal RUNTIME_SIGNALS, runtime_records.map(&:signal)
+    assert_equal "PlywoFailingEvidenceJob", product_records.first.producer_name
+    assert_equal "runtime", product_records.first.confidence
+    assert_equal({ "error_class" => "RuntimeError" }, product_records.last.payload)
+    assert runtime_records.all? { |record| record.payload.fetch("value") >= 0.0 }
 
     work_item = PlywoExecutionWorkItem.find_by!(execution_id:, work_id: job.job_id)
     assert_equal "failed", work_item.status
