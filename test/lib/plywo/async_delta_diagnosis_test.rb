@@ -1,7 +1,7 @@
 require "test_helper"
 
 class PlywoAsyncDeltaDiagnosisTest < ActiveSupport::TestCase
-  test "attributes queue-stage regression to enqueue-to-start delta" do
+  test "attributes queue-stage regression to enqueue-to-start delta for legacy evidence" do
     result = Plywo::AsyncDeltaDiagnosis.call(
       queue_wait: signal(delta: 264.1, regression: true),
       worker_wall: signal(delta: 0.0)
@@ -11,6 +11,34 @@ class PlywoAsyncDeltaDiagnosisTest < ActiveSupport::TestCase
     assert_equal 264.1, result.fetch("queue_wait_delta_ms")
     assert_equal 0.0, result.fetch("worker_wall_delta_ms")
     assert_equal 100.0, result.fetch("dominant_delta_share_percent")
+  end
+
+  test "separates deliberate scheduling from dispatch regression" do
+    result = Plywo::AsyncDeltaDiagnosis.call(
+      queue_wait: signal(delta: 250.0),
+      scheduled_delay: signal(delta: 250.0),
+      dispatch_wait: signal(delta: 0.0),
+      worker_wall: signal(delta: 0.0)
+    )
+
+    assert_equal "scheduled_delay_change", result.fetch("classification")
+    assert_equal 250.0, result.fetch("scheduled_delay_delta_ms")
+    assert_equal 0.0, result.fetch("dispatch_wait_delta_ms")
+    assert_equal 100.0, result.fetch("scheduled_delay_delta_share_percent")
+  end
+
+  test "attributes post-eligibility growth to dispatch wait" do
+    result = Plywo::AsyncDeltaDiagnosis.call(
+      queue_wait: signal(delta: 401.8),
+      scheduled_delay: signal(delta: 0.0),
+      dispatch_wait: signal(delta: 401.8, regression: true),
+      worker_wall: signal(delta: 0.0)
+    )
+
+    assert_equal "dispatch_wait_regression", result.fetch("classification")
+    assert_equal 401.8, result.fetch("dispatch_wait_delta_ms")
+    assert_equal 100.0, result.fetch("dispatch_wait_delta_share_percent")
+    assert_equal 0.0, result.fetch("worker_runtime_delta_share_percent")
   end
 
   test "attributes worker regression to worker runtime delta" do
@@ -24,7 +52,7 @@ class PlywoAsyncDeltaDiagnosisTest < ActiveSupport::TestCase
     assert_equal 96.7, result.fetch("dominant_delta_share_percent")
   end
 
-  test "keeps substantial positive growth in both stages as mixed" do
+  test "keeps substantial positive growth in both legacy stages as mixed" do
     result = Plywo::AsyncDeltaDiagnosis.call(
       queue_wait: signal(delta: 60.0, regression: true),
       worker_wall: signal(delta: 40.0, regression: true)
@@ -55,7 +83,7 @@ class PlywoAsyncDeltaDiagnosisTest < ActiveSupport::TestCase
     assert_nil result.fetch("positive_async_delta_ms")
   end
 
-  test "behavioral diff exposes the dominant async regression source" do
+  test "behavioral diff exposes the dominant async regression source for legacy evidence" do
     result = Plywo::BehavioralDiff.call(
       baseline: measurements(queue_wait_ms: 137.5, worker_wall_ms: 0.1),
       candidate: measurements(queue_wait_ms: 401.6, worker_wall_ms: 0.1)
