@@ -4,18 +4,9 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-log() {
-  printf '\n==> %s\n' "$*"
-}
-
-warn() {
-  printf '\nWARNING: %s\n' "$*" >&2
-}
-
-die() {
-  printf '\nERROR: %s\n' "$*" >&2
-  exit 1
-}
+log() { printf '\n==> %s\n' "$*"; }
+warn() { printf '\nWARNING: %s\n' "$*" >&2; }
+die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 
 select_environment() {
   local requested="${1:-}"
@@ -50,14 +41,17 @@ select_environment() {
   case "$ENVIRONMENT" in
     development)
       APP_NAME="Plywo Development"
+      APP_SLUG="plywo-development"
       MANIFEST_PATH=".github/app-manifest.development.json"
       ;;
     staging)
       APP_NAME="Plywo Staging"
+      APP_SLUG="plywo-staging"
       MANIFEST_PATH=".github/app-manifest.staging.json"
       ;;
     production)
       APP_NAME="Plywo"
+      APP_SLUG="plywo"
       MANIFEST_PATH=".github/app-manifest.json"
       ;;
   esac
@@ -78,6 +72,7 @@ RAILS_LOG="${TMP_BASE}.rails.log"
 CF_PID=""
 RAILS_PID=""
 TAIL_PID=""
+APP_ALREADY_CONFIGURED=0
 
 cleanup() {
   set +e
@@ -179,10 +174,23 @@ prepare_database() {
 source_github_app_credentials() {
   local env_file="tmp/github-app/${ENVIRONMENT}.env"
 
-  if [[ -f "$env_file" ]]; then
-    log "Loading existing ${APP_NAME} credentials"
-    # shellcheck disable=SC1090
-    source "$env_file"
+  if [[ ! -f "$env_file" ]]; then
+    return 0
+  fi
+
+  log "Loading existing ${APP_NAME} credentials"
+  # shellcheck disable=SC1090
+  source "$env_file"
+
+  if [[ -n "${PLYWO_GITHUB_APP_ID:-}" && \
+        -n "${PLYWO_GITHUB_CLIENT_ID:-}" && \
+        -n "${PLYWO_GITHUB_WEBHOOK_SECRET:-}" && \
+        -n "${PLYWO_GITHUB_PRIVATE_KEY_PATH:-}" && \
+        -f "${PLYWO_GITHUB_PRIVATE_KEY_PATH}" ]]; then
+    APP_ALREADY_CONFIGURED=1
+    log "Existing ${APP_NAME} detected. Manifest registration will be skipped."
+  else
+    warn "${env_file} exists but is incomplete. Registration flow will remain available."
   fi
 }
 
@@ -256,7 +264,7 @@ find_named_tunnel_id() {
 }
 
 prompt_public_hostname() {
-  local example
+  local example hostname
   case "$ENVIRONMENT" in
     development) example="github-dev.example.com" ;;
     staging) example="github-staging.example.com" ;;
@@ -403,25 +411,35 @@ verify_public_endpoint() {
   log "Public endpoint is healthy"
 }
 
-open_registration_page() {
+finish_setup() {
   local registration_url="${PLYWO_PUBLIC_URL}/github/app/register"
+  local settings_url="https://github.com/organizations/${PLYWO_GITHUB_APP_OWNER}/settings/apps/${APP_SLUG}"
+  local install_url="https://github.com/apps/${APP_SLUG}/installations/new"
 
-  printf '\n%s setup is ready.\n' "$APP_NAME"
-  printf 'Environment:  %s\n' "$ENVIRONMENT"
-  printf 'Manifest:     %s\n' "$MANIFEST_PATH"
-  printf 'Registration: %s\n' "$registration_url"
-  printf 'Rails log:    %s\n' "$RAILS_LOG"
-  printf 'Tunnel log:   %s\n' "$CF_LOG"
+  printf '\n%s is ready.\n' "$APP_NAME"
+  printf 'Environment: %s\n' "$ENVIRONMENT"
+  printf 'Public URL:  %s\n' "$PLYWO_PUBLIC_URL"
+  printf 'Rails log:   %s\n' "$RAILS_LOG"
+  printf 'Tunnel log:  %s\n' "$CF_LOG"
 
-  if [[ "$ENVIRONMENT" != "development" ]]; then
-    printf '\nIMPORTANT: staging/production credentials are shown only on the callback page. Save them to the target secret store.\n'
+  if [[ "$APP_ALREADY_CONFIGURED" == "1" ]]; then
+    printf '\nExisting GitHub App detected. No new App will be created.\n'
+    printf 'Settings: %s\n' "$settings_url"
+    printf 'Install:  %s\n' "$install_url"
+
+    if [[ "${PLYWO_OPEN_INSTALL:-0}" == "1" && "${NO_OPEN:-0}" != "1" ]] && command -v open >/dev/null 2>&1; then
+      open "$install_url"
+    fi
+  else
+    printf 'Manifest:    %s\n' "$MANIFEST_PATH"
+    printf 'Registration: %s\n' "$registration_url"
+
+    if [[ "${NO_OPEN:-0}" != "1" ]] && command -v open >/dev/null 2>&1; then
+      open "$registration_url"
+    fi
   fi
 
-  printf '\nPress Ctrl-C to stop Rails and the tunnel.\n\n'
-
-  if [[ "${NO_OPEN:-0}" != "1" ]] && command -v open >/dev/null 2>&1; then
-    open "$registration_url"
-  fi
+  printf '\nPress Ctrl-C to stop Rails and any tunnel process started by this script.\n\n'
 }
 
 main() {
@@ -437,7 +455,7 @@ main() {
   start_tunnel
   start_rails
   verify_public_endpoint
-  open_registration_page
+  finish_setup
 
   touch "$CF_LOG" "$RAILS_LOG"
   tail -n 40 -f "$RAILS_LOG" "$CF_LOG" &
