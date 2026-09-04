@@ -9,7 +9,7 @@ class PlywoGithubRepositoryCapabilityProviderTest < ActiveSupport::TestCase
     end
 
     def find_by(execution_id:)
-      return @execution if execution_id == "github-123"
+      @execution if execution_id == "github-123"
     end
   end
 
