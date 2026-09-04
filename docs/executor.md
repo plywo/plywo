@@ -133,7 +133,63 @@ The bearer token authenticates the control plane to the executor service. It is 
 
 A non-2xx response, invalid JSON, or invalid result schema becomes a transport `INFRA_FAILURE`; a valid failed `Result` preserves the remote worker's original error class and message through finalization.
 
-This slice implements the outbound control-plane transport. It does not yet implement or deploy the remote executor HTTP service itself.
+## Executor service role
+
+The same codebase can now be deployed in a separate executor-service role. The endpoint is mounted only when:
+
+```text
+PLYWO_EXECUTOR_SERVICE=1
+```
+
+The service accepts:
+
+```text
+POST /v1/executions
+```
+
+and requires a dedicated bearer token:
+
+```text
+PLYWO_EXECUTOR_SERVICE_TOKEN=...
+```
+
+The control-plane `PLYWO_REMOTE_EXECUTOR_TOKEN` and the service-side `PLYWO_EXECUTOR_SERVICE_TOKEN` are the two ends of the same service-authentication credential. They are separate from GitHub App credentials.
+
+The initial worker implementation is selected independently with:
+
+```text
+PLYWO_EXECUTOR_SERVICE_ADAPTER=local
+```
+
+This separation is intentional. A service deployment must not set `PLYWO_EXECUTOR=remote` and recursively call itself, and it must not receive the GitHub App private key, webhook secret, or installation tokens.
+
+### Durable transport idempotency
+
+Every executor service request is stored in `plywo_executor_requests`, keyed uniquely by the HTTP `Idempotency-Key`. The ledger stores only the portable request, its digest, the portable result, and service-side claim metadata. It does not store the bearer token.
+
+For the same idempotency key:
+
+- the same completed request returns the previously stored `Result`
+- a still-processing request returns conflict with `Retry-After`
+- reuse with different request content is rejected
+- an abandoned processing request can be reclaimed after its service-side claim lease expires
+- a stale worker claim cannot overwrite the result after another worker has reclaimed the request
+
+Request digests canonicalize nested hash key ordering before hashing, so semantically identical JSON objects do not conflict only because their keys were reordered.
+
+The service-side request lease defaults to 40 minutes:
+
+```text
+PLYWO_EXECUTOR_SERVICE_REQUEST_LEASE_SECONDS=2400
+```
+
+This lease protects transport idempotency. It is separate from the control-plane `PlywoExecution` lease, which protects the product execution lifecycle.
+
+### Current execution scope
+
+The first service role intentionally reuses `LocalPullRequestRunner`. That means it is currently suitable for Plywo dogfood and for deployments where the executor has the relevant repository checkout and commits available locally. It does not yet solve private repository checkout for arbitrary customer repositories.
+
+A later clone-capability slice should provide a short-lived repository capability to the executor without putting GitHub installation credentials into the stable `Request` schema.
 
 ## Trust boundary
 
@@ -147,10 +203,22 @@ The executor can report observations and execution failures. It does not decide 
 - retry eligibility and attempt counting
 - GitHub publication
 
-This keeps an executor replaceable: local process, container, VM, Kubernetes job, or another disposable worker can implement the same boundary.
+The executor service role owns only:
 
-## Next remote-runtime boundary
+- authenticating the control-plane service credential
+- durable idempotency for one execution attempt
+- acquiring a service-side worker claim
+- producing `Plywo::Executor::Result`
 
-The next slice should implement a small authenticated executor service that accepts the HTTP request contract and runs in a separate trust/deployment role with no GitHub App credentials.
+This keeps the executor replaceable: local process, container, VM, Kubernetes job, or another disposable worker can implement the same boundary.
 
-Long-running remote work also needs a narrow authenticated heartbeat/cancellation protocol so the executor can renew its lease while useful work is still progressing without receiving database access or GitHub credentials.
+## Remaining remote-runtime boundaries
+
+The HTTP service is now represented in code, but production remote execution is not complete. The important remaining boundaries are:
+
+1. private-repository checkout through a short-lived clone capability rather than GitHub App credentials in the request contract
+2. heartbeat/cancellation for long-running remote work so useful work can renew the control-plane lease without database access
+3. deployment isolation proving the executor role actually runs without GitHub App secrets
+4. a real control-plane -> executor-service E2E on separate processes/hosts
+
+The live Development App infra-failure Re-run proof remains tracked independently in #35.
