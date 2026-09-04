@@ -1,7 +1,12 @@
 module Plywo
   class BehavioralDiff
     SIGNALS = {
-      "duration_ms" => { reason_code: "PERFORMANCE_REGRESSION", threshold_percent: 20.0, severity: "high" },
+      "duration_ms" => {
+        reason_code: "PERFORMANCE_REGRESSION",
+        threshold_percent: 20.0,
+        threshold_absolute: 20.0,
+        severity: "high"
+      },
       "sql_queries" => { reason_code: "DATABASE_QUERY_REGRESSION", threshold_percent: 25.0, severity: "high" },
       "background_jobs" => { reason_code: "SIDE_EFFECT_CHANGED", threshold_absolute: 0, severity: "medium" },
       "emails" => { reason_code: "SIDE_EFFECT_CHANGED", threshold_absolute: 0, severity: "high" },
@@ -87,11 +92,11 @@ module Plywo
     def regression?(baseline, candidate, policy)
       return false unless candidate > baseline
 
-      if policy.key?(:threshold_absolute)
-        (candidate - baseline) > policy.fetch(:threshold_absolute)
-      else
-        percent_change(baseline, candidate) > policy.fetch(:threshold_percent)
-      end
+      delta = candidate - baseline
+      checks = []
+      checks << delta > policy.fetch(:threshold_absolute) if policy.key?(:threshold_absolute)
+      checks << percent_change(baseline, candidate) > policy.fetch(:threshold_percent) if policy.key?(:threshold_percent)
+      checks.all?
     end
 
     def display_delta(delta, delta_percent)
