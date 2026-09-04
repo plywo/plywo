@@ -14,6 +14,17 @@ class PlywoRealQueueProbeJob < ApplicationJob
   end
 end
 
+class PlywoQueueFanoutChildJob < ApplicationJob
+  def perform
+  end
+end
+
+class PlywoQueueFanoutParentJob < ApplicationJob
+  def perform
+    PlywoQueueFanoutChildJob.perform_later
+  end
+end
+
 class PlywoRailsTestQueueExecutionTest < ActiveSupport::TestCase
   setup do
     Current.reset
@@ -67,6 +78,7 @@ class PlywoRailsTestQueueExecutionTest < ActiveSupport::TestCase
     assert_nil Current.plywo_execution_id
 
     executions = Plywo::Rails::TestQueueExecution.drain(execution_id:)
+    quiescence = Plywo::Rails::ExecutionQuiescence.wait(execution_id:, quiet_period_seconds: 0)
 
     assert_equal 1, executions.size
     assert_equal "PlywoRealQueueProbeJob", executions.first.fetch("job_class")
@@ -84,8 +96,8 @@ class PlywoRailsTestQueueExecutionTest < ActiveSupport::TestCase
     assert_not_nil work_item.finished_at
     assert_nil work_item.error_class
     assert work_item.terminal?
-    assert Plywo::Rails::ExecutionWorkLifecycle.quiescent?(execution_id:)
-    assert_equal 0, Plywo::Rails::ExecutionWorkLifecycle.pending_count(execution_id:)
+    assert quiescence.fetch("quiescent")
+    assert_equal 0, quiescence.fetch("pending_count")
 
     record = PlywoEvidenceEvent.find_by!(execution_id:, signal: "sql_queries")
     assert_equal "PlywoRealQueueProbeJob", record.producer_name
@@ -96,6 +108,30 @@ class PlywoRailsTestQueueExecutionTest < ActiveSupport::TestCase
     ActiveSupport::Notifications.unsubscribe(subscriber) if subscriber
   end
 
+  test "drives correlated child jobs until the durable execution becomes quiescent" do
+    execution_id = "fanout-execution"
+
+    Current.set(
+      plywo_execution_id: execution_id,
+      plywo_run_id: "fanout-run",
+      plywo_subject: "candidate"
+    ) do
+      PlywoQueueFanoutParentJob.perform_later
+    end
+
+    executions = Plywo::Rails::TestQueueExecution.drain(execution_id:)
+    quiescence = Plywo::Rails::ExecutionQuiescence.wait(execution_id:, quiet_period_seconds: 0)
+    work_items = PlywoExecutionWorkItem.where(execution_id:).order(:id).to_a
+
+    assert_equal %w[PlywoQueueFanoutParentJob PlywoQueueFanoutChildJob], executions.map { |item| item.fetch("job_class") }
+    assert_equal 2, work_items.size
+    assert work_items.all?(&:terminal?)
+    assert_equal %w[completed completed], work_items.map(&:status)
+    assert quiescence.fetch("quiescent")
+    assert_equal 0, quiescence.fetch("pending_count")
+    assert_empty ActiveJob::Base.queue_adapter.enqueued_jobs
+  end
+
   test "leaves jobs and lifecycle state from other executions pending" do
     Current.set(plywo_execution_id: "execution-a") { DemoNotificationJob.perform_later }
     Current.set(plywo_execution_id: "execution-b") { DemoNotificationJob.perform_later }
@@ -104,10 +140,11 @@ class PlywoRailsTestQueueExecutionTest < ActiveSupport::TestCase
     assert_equal 1, Plywo::Rails::ExecutionWorkLifecycle.pending_count(execution_id: "execution-b")
 
     executions = Plywo::Rails::TestQueueExecution.drain(execution_id: "execution-a")
+    quiescence = Plywo::Rails::ExecutionQuiescence.wait(execution_id: "execution-a", quiet_period_seconds: 0)
 
     assert_equal 1, executions.size
     assert_equal "execution-a", executions.first.fetch("execution_id")
-    assert Plywo::Rails::ExecutionWorkLifecycle.quiescent?(execution_id: "execution-a")
+    assert quiescence.fetch("quiescent")
     assert_not Plywo::Rails::ExecutionWorkLifecycle.quiescent?(execution_id: "execution-b")
     assert_equal 1, ActiveJob::Base.queue_adapter.enqueued_jobs.size
     remaining_context = ActiveJob::Base.queue_adapter.enqueued_jobs.first.fetch(
