@@ -19,7 +19,7 @@ module Demo
       end
 
       profile.fetch(:background_jobs).times do
-        DemoNotificationJob.perform_later(Current.plywo_execution_id)
+        DemoNotificationJob.perform_later
       end
 
       profile.fetch(:emails).times do
