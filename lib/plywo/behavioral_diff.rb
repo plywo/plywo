@@ -1,3 +1,5 @@
+require_relative "runtime_diagnosis"
+
 module Plywo
   class BehavioralDiff
     SIGNALS = {
@@ -179,29 +181,12 @@ module Plywo
     end
 
     def runtime_profile(wall, thread_cpu, side)
-      return { "classification" => "unknown", "cpu_ratio_percent" => nil } unless wall.fetch("available", true) && thread_cpu.fetch("available", true)
+      return RuntimeDiagnosis.call(wall_ms: nil, thread_cpu_ms: nil) unless wall.fetch("available", true) && thread_cpu.fetch("available", true)
 
-      wall_ms = wall[side]
-      thread_cpu_ms = thread_cpu[side]
-      return { "classification" => "unknown", "cpu_ratio_percent" => nil } if wall_ms.nil? || thread_cpu_ms.nil?
-
-      wall_ms = wall_ms.to_f
-      thread_cpu_ms = thread_cpu_ms.to_f
-      return { "classification" => "unknown", "cpu_ratio_percent" => nil } unless wall_ms.positive?
-
-      ratio = ((thread_cpu_ms / wall_ms) * 100).round(1)
-      classification = if ratio >= 70.0
-        "cpu_bound"
-      elsif ratio <= 30.0
-        "wait_bound"
-      else
-        "mixed"
-      end
-
-      {
-        "classification" => classification,
-        "cpu_ratio_percent" => ratio
-      }
+      RuntimeDiagnosis.call(
+        wall_ms: wall[side],
+        thread_cpu_ms: thread_cpu[side]
+      ).slice("classification", "cpu_ratio_percent")
     end
 
     def block_merge?(findings)

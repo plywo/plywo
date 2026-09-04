@@ -1,3 +1,5 @@
+require_relative "runtime_diagnosis"
+
 module Plywo
   class ExecutionReducer
     COUNTABLE_SIGNALS = %w[sql_queries background_jobs emails http_requests errors].freeze
@@ -86,36 +88,14 @@ module Plywo
 
     def runtime_profile(measurements)
       {
-        "request" => classify_runtime(
-          wall_ms: measurements.fetch("duration_ms", 0.0),
-          thread_cpu_ms: measurements.fetch("thread_cpu_ms", 0.0)
+        "request" => RuntimeDiagnosis.call(
+          wall_ms: measurements["duration_ms"],
+          thread_cpu_ms: measurements["thread_cpu_ms"]
         ),
-        "worker" => classify_runtime(
-          wall_ms: measurements.fetch("worker_wall_ms", 0.0),
-          thread_cpu_ms: measurements.fetch("worker_thread_cpu_ms", 0.0)
+        "worker" => RuntimeDiagnosis.call(
+          wall_ms: measurements["worker_wall_ms"],
+          thread_cpu_ms: measurements["worker_thread_cpu_ms"]
         )
-      }
-    end
-
-    def classify_runtime(wall_ms:, thread_cpu_ms:)
-      wall_ms = wall_ms.to_f
-      thread_cpu_ms = thread_cpu_ms.to_f
-      return { "classification" => "unknown", "cpu_ratio_percent" => nil } unless wall_ms.positive?
-
-      ratio = ((thread_cpu_ms / wall_ms) * 100).round(1)
-      classification = if ratio >= 70.0
-        "cpu_bound"
-      elsif ratio <= 30.0
-        "wait_bound"
-      else
-        "mixed"
-      end
-
-      {
-        "classification" => classification,
-        "cpu_ratio_percent" => ratio,
-        "wall_ms" => wall_ms.round(1),
-        "thread_cpu_ms" => thread_cpu_ms.round(1)
       }
     end
 
