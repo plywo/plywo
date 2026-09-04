@@ -43,12 +43,25 @@ module Plywo
       attributions = @candidate.fetch("attributions", {})
 
       result.fetch("findings").each do |finding|
-        locations = attributions.fetch(finding.fetch("signal"), [])
-        source = locations.find do |location|
-          location.fetch("confidence", nil) == "explicit" && @changed_paths.include?(location.fetch("path", nil))
-        end
+        source = trusted_source(attributions.fetch(finding.fetch("signal"), []))
         finding["source"] = source if source
       end
+    end
+
+    def trusted_source(locations)
+      explicit = locations.find do |location|
+        location["confidence"] == "explicit" && changed_path?(location)
+      end
+      return explicit if explicit
+
+      runtime = locations.select do |location|
+        location["confidence"] == "runtime" && changed_path?(location)
+      end
+      runtime.one? ? runtime.first : nil
+    end
+
+    def changed_path?(location)
+      @changed_paths.include?(location["path"])
     end
 
     def stringify_keys(hash)

@@ -26,24 +26,42 @@ The check uses the Plywo `run_id` as `external_id`. GitHub Actions may assign it
 
 ## Annotations
 
-Annotations are deliberately conservative. A finding is source-localized only when both conditions are true:
+Annotations are deliberately conservative. A finding is source-localized only when runtime evidence provides a trustworthy source and the attributed path is present in the exact `base...head` changed-file set.
 
-1. runtime evidence supplied an explicit source attribution for that signal;
-2. the attributed path is present in the exact `base...head` changed-file set.
-
-Only then does the finding gain a versioned `source` object and project into a GitHub Check annotation. Unattributed runtime regressions still affect the Check conclusion and PR comment but never point at a guessed line of code.
+Plywo currently recognizes two trusted source modes:
 
 ```text
-runtime attribution
+explicit -> an integration supplied an exact source location
+runtime  -> Plywo captured an application callsite while the signal occurred
+```
+
+Trust order is conservative:
+
+```text
+changed explicit source
+        ↓
+changed single runtime source
+        ↓
+otherwise no source annotation
+```
+
+An explicit source always wins. Automatic runtime attribution is accepted only when exactly one changed-code runtime location exists for the finding. If multiple runtime callsites are plausible, the regression still affects the Check conclusion and PR comment, but Plywo does not guess which line to blame.
+
+```text
+runtime evidence
       +
 changed-file proof
+      +
+unambiguous source
       ↓
 finding.source
       ↓
 GitHub annotation
 ```
 
-`Plywo::Rails::Evidence.attribute_next_line` is a low-level convenience marker. Keep the call on one physical line and place it immediately above the causal line that should receive the annotation. For integrations that already know the exact location, prefer `Plywo::Rails::Evidence.attribute(..., line:)`.
+For Rails SQL evidence, Plywo captures the synchronous application callsite from `sql.active_record` and excludes dependency/runtime paths such as `vendor/`, `tmp/`, and `.bundle/`. This instrumentation is intended for Plywo executions such as CI and test environments, not as an always-on production profiler by default.
+
+`Plywo::Rails::Evidence.attribute_next_line` remains a low-level explicit override. Keep the call on one physical line and place it immediately above the causal line that should receive the annotation. For integrations that already know the exact location, prefer `Plywo::Rails::Evidence.attribute(..., line:)`.
 
 ## Agent contract
 
