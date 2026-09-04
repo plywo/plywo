@@ -66,4 +66,25 @@ class PlywoRailsEvidenceCollectorTest < ActiveSupport::TestCase
     assert_equal enqueue_line, source.fetch("end_line")
     assert_equal "runtime", source.fetch("confidence")
   end
+
+  test "captures the project delivery callsite for a real email" do
+    execution_id = "execution-with-email-source"
+    collector = Plywo::Rails::EvidenceCollector.new(execution_id:)
+    delivery_line = nil
+
+    measurements = collector.capture do
+      Current.set(plywo_execution_id: execution_id) do
+        delivery_line = __LINE__ + 1
+        DemoMailer.notification(execution_id).deliver_now
+      end
+    end
+
+    source = collector.attributions.fetch("emails").first
+
+    assert_equal 1, measurements.fetch("emails")
+    assert_equal "test/lib/plywo/rails/evidence_collector_test.rb", source.fetch("path")
+    assert_equal delivery_line, source.fetch("start_line")
+    assert_equal delivery_line, source.fetch("end_line")
+    assert_equal "runtime", source.fetch("confidence")
+  end
 end
