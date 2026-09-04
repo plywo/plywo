@@ -43,7 +43,11 @@ class PlywoExecution < ApplicationRecord
   end
 
   def fail!(error)
-    message = "#{error.class}: #{error.message}".truncate(2_000)
+    fail_details!(error_class: error.class.to_s, error_message: error.message)
+  end
+
+  def fail_details!(error_class:, error_message:)
+    message = "#{error_class}: #{error_message}".truncate(2_000)
     update!(status: "failed", outcome: "infra_failure", failure: message, finished_at: Time.current)
   end
 
