@@ -41,7 +41,8 @@ module Plywo
           ActiveSupport::Notifications.subscribe("enqueue.active_job") { record_job },
           ActiveSupport::Notifications.subscribe("enqueue_at.active_job") { record_job },
           ActiveSupport::Notifications.subscribe("deliver.action_mailer") { record_email },
-          ActiveSupport::Notifications.subscribe("process_action.action_controller") { |event| record_request(event.payload) },
+          ActiveSupport::Notifications.subscribe(NetHttpInstrumentation::EVENT_NAME) { record_http_request },
+          ActiveSupport::Notifications.subscribe("process_action.action_controller") { |event| record_action(event.payload) },
           ActiveSupport::Notifications.subscribe(Evidence::EVENT_NAME) { |event| record_side_effect(event.payload) },
           ActiveSupport::Notifications.subscribe(Evidence::ATTRIBUTION_EVENT_NAME) { |event| record_attribution(event.payload) }
         ]
@@ -70,10 +71,16 @@ module Plywo
         record_runtime_attribution("emails")
       end
 
-      def record_request(payload)
+      def record_http_request
         return unless current_execution?
 
         @measurements["http_requests"] += 1
+        record_runtime_attribution("http_requests")
+      end
+
+      def record_action(payload)
+        return unless current_execution?
+
         @measurements["errors"] += 1 if payload[:exception] || payload[:exception_object]
       end
 
