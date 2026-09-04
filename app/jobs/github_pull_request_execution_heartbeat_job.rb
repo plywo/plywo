@@ -19,7 +19,7 @@ class GithubPullRequestExecutionHeartbeatJob < ApplicationJob
   def perform(execution_id, attempt_number)
     execution = PlywoExecution.find_by(execution_id:)
     return unless execution
-    return unless execution.status == "running"
+    return unless PlywoExecution::LEASED_STATUSES.include?(execution.status)
     return unless execution.attempt_count == Integer(attempt_number)
     return unless execution.renew_lease!
 
