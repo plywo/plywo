@@ -4,10 +4,12 @@ require "json"
 require "rack/mock"
 require "securerandom"
 
-require File.join(Dir.pwd, "config/environment")
+SUBJECT_ROOT = Dir.pwd.freeze
+
+require File.join(SUBJECT_ROOT, "config/environment")
 
 unless defined?(Plywo::Rails::ExecutionQuiescence)
-  require File.expand_path("../lib/plywo/rails/execution_quiescence", __dir__)
+  require File.join(SUBJECT_ROOT, "lib/plywo/rails/execution_quiescence")
 end
 
 class PlywoSubjectCapture
@@ -118,11 +120,13 @@ class PlywoSubjectCapture
   def require_test_queue_execution
     return if defined?(Plywo::Rails::TestQueueExecution::DEFAULT_MAX_JOBS)
 
-    require File.expand_path("../lib/plywo/rails/test_queue_execution", __dir__)
+    require File.join(SUBJECT_ROOT, "lib/plywo/rails/test_queue_execution")
   end
 
   def require_solid_queue_execution
-    require File.expand_path("../lib/plywo/rails/solid_queue_execution", __dir__)
+    return if defined?(Plywo::Rails::SolidQueueExecution)
+
+    require File.join(SUBJECT_ROOT, "lib/plywo/rails/solid_queue_execution")
   end
 
   def reset_test_queue
