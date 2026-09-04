@@ -3,5 +3,6 @@ class DemoAsyncEvidenceJob < ApplicationJob
     ApplicationRecord.connection.select_value("SELECT 1")
     DemoMailer.notification(Current.plywo_execution_id).deliver_now
     Net::HTTP.get(URI.parse(Plywo::Demo::LoopbackHttpServer.url))
+    Net::HTTP.get(URI.parse(Plywo::Demo::LoopbackHttpServer.url))
   end
 end
