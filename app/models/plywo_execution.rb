@@ -3,25 +3,67 @@ class PlywoExecution < ApplicationRecord
   TERMINAL_STATUSES = %w[completed ignored failed].freeze
   STATUSES = (ACTIVE_STATUSES + TERMINAL_STATUSES).freeze
   OUTCOMES = %w[allow review block infra_failure stale manual_review_required].freeze
+  DEFAULT_LEASE_SECONDS = 30.minutes.to_i
 
   validates :execution_id, :source, :scenario_id, :baseline_sha, :candidate_sha, :status, presence: true
   validates :execution_id, uniqueness: true
   validates :status, inclusion: { in: STATUSES }
   validates :outcome, inclusion: { in: OUTCOMES }, allow_nil: true
 
-  def claim!
+  def self.lease_seconds
+    Integer(ENV.fetch("PLYWO_EXECUTION_LEASE_SECONDS", DEFAULT_LEASE_SECONDS))
+  end
+
+  def claim!(now: Time.current, lease_seconds: self.class.lease_seconds)
     claimed = self.class.where(id:, status: "queued").update_all(
       status: "running",
-      started_at: Time.current,
+      started_at: now,
+      heartbeat_at: now,
+      lease_expires_at: now + lease_seconds,
       finished_at: nil,
       failure: nil,
       outcome: nil,
       attempt_count: attempt_count + 1,
-      updated_at: Time.current
+      updated_at: now
     )
 
     reload if claimed == 1
     claimed == 1
+  end
+
+  def renew_lease!(now: Time.current, lease_seconds: self.class.lease_seconds)
+    renewed = self.class
+      .where(id:, status: "running")
+      .where("lease_expires_at > ?", now)
+      .update_all(
+        heartbeat_at: now,
+        lease_expires_at: now + lease_seconds,
+        updated_at: now
+      )
+
+    reload if renewed == 1
+    renewed == 1
+  end
+
+  def lease_expired?(at: Time.current)
+    status == "running" && lease_expires_at.present? && lease_expires_at <= at
+  end
+
+  def expire_lease!(now: Time.current)
+    expired = self.class
+      .where(id:, status: "running")
+      .where("lease_expires_at <= ?", now)
+      .update_all(
+        status: "failed",
+        outcome: "infra_failure",
+        failure: "Plywo::Executor::LeaseExpired: executor did not finalize before its lease expired",
+        lease_expires_at: nil,
+        finished_at: now,
+        updated_at: now
+      )
+
+    reload if expired == 1
+    expired == 1
   end
 
   def complete!(payload)
@@ -32,6 +74,7 @@ class PlywoExecution < ApplicationRecord
       outcome: behavioral_outcome(payload),
       result: payload,
       failure: nil,
+      lease_expires_at: nil,
       finished_at: Time.current
     )
   end
@@ -39,7 +82,13 @@ class PlywoExecution < ApplicationRecord
   def ignore!(reason)
     reason = reason.to_s
     outcome = reason.start_with?("stale") ? "stale" : "manual_review_required"
-    update!(status: "ignored", outcome:, failure: reason, finished_at: Time.current)
+    update!(
+      status: "ignored",
+      outcome:,
+      failure: reason,
+      lease_expires_at: nil,
+      finished_at: Time.current
+    )
   end
 
   def fail!(error)
@@ -48,7 +97,13 @@ class PlywoExecution < ApplicationRecord
 
   def fail_details!(error_class:, error_message:)
     message = "#{error_class}: #{error_message}".truncate(2_000)
-    update!(status: "failed", outcome: "infra_failure", failure: message, finished_at: Time.current)
+    update!(
+      status: "failed",
+      outcome: "infra_failure",
+      failure: message,
+      lease_expires_at: nil,
+      finished_at: Time.current
+    )
   end
 
   def rerunnable?
@@ -63,6 +118,8 @@ class PlywoExecution < ApplicationRecord
       result: {},
       failure: nil,
       started_at: nil,
+      heartbeat_at: nil,
+      lease_expires_at: nil,
       finished_at: nil,
       updated_at: Time.current
     )

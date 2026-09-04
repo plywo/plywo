@@ -83,6 +83,18 @@ class GithubPullRequestExecutionFinalizeJobTest < ActiveJob::TestCase
     assert_equal 0, publisher.infra_calls
   end
 
+  test "ignores a late executor result after its lease has expired" do
+    execution = running_execution
+    execution.update!(lease_expires_at: 1.minute.ago)
+
+    job = TestJob.new
+    job.perform(execution.execution_id, Plywo::Executor::Result.success(payload).to_h)
+
+    execution.reload
+    assert_equal "running", execution.status
+    assert execution.lease_expired?
+  end
+
   test "ignores a duplicate result after the execution is terminal" do
     execution = running_execution
     execution.complete!(payload)
