@@ -55,6 +55,21 @@ class PlywoAsyncDeltaDiagnosisTest < ActiveSupport::TestCase
     assert_nil result.fetch("positive_async_delta_ms")
   end
 
+  test "behavioral diff exposes the dominant async regression source" do
+    result = Plywo::BehavioralDiff.call(
+      baseline: measurements(queue_wait_ms: 137.5, worker_wall_ms: 0.1),
+      candidate: measurements(queue_wait_ms: 401.6, worker_wall_ms: 0.1)
+    )
+
+    diagnosis = result.dig("runtime_diagnosis", "async_delta")
+
+    assert_equal "review", result.fetch("merge_recommendation")
+    assert_equal "enqueue_to_start_regression", diagnosis.fetch("classification")
+    assert_equal 264.1, diagnosis.fetch("queue_wait_delta_ms")
+    assert_equal 0.0, diagnosis.fetch("worker_wall_delta_ms")
+    assert_equal 100.0, diagnosis.fetch("dominant_delta_share_percent")
+  end
+
   private
 
   def signal(delta:, regression: false, available: true)
@@ -62,6 +77,21 @@ class PlywoAsyncDeltaDiagnosisTest < ActiveSupport::TestCase
       "delta" => delta,
       "regression" => regression,
       "available" => available
+    }
+  end
+
+  def measurements(queue_wait_ms:, worker_wall_ms:)
+    {
+      queue_wait_ms:,
+      worker_wall_ms:,
+      worker_thread_cpu_ms: 0.1,
+      duration_ms: 50.0,
+      thread_cpu_ms: 20.0,
+      sql_queries: 17,
+      background_jobs: 1,
+      emails: 1,
+      http_requests: 1,
+      errors: 0
     }
   end
 end
