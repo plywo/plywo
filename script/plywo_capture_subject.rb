@@ -5,6 +5,7 @@ require "rack/mock"
 require "securerandom"
 
 require File.join(Dir.pwd, "config/environment")
+require File.expand_path("../lib/plywo/rails/test_queue_execution", __dir__)
 
 class PlywoSubjectCapture
   DEFAULT_PATH = "/__plywo/demo/behavior".freeze
