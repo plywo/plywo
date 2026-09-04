@@ -5,6 +5,7 @@ ruby "3.4.10"
 gem "rails", "8.1.3.1"
 gem "pg", "~> 1.5"
 gem "puma", ">= 6.0"
+gem "solid_queue"
 gem "bootsnap", require: false
 
 group :development, :test do
