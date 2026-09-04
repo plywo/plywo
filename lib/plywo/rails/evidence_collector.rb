@@ -1,7 +1,7 @@
 module Plywo
   module Rails
     class EvidenceCollector
-      IGNORED_SQL_NAMES = %w[SCHEMA TRANSACTION CACHE].freeze
+      MEASUREMENT_SIGNALS = %w[sql_queries background_jobs emails http_requests errors].freeze
 
       attr_reader :attributions
 
@@ -11,13 +11,7 @@ module Plywo
 
       def initialize(execution_id:)
         @execution_id = execution_id
-        @measurements = {
-          "sql_queries" => 0,
-          "background_jobs" => 0,
-          "emails" => 0,
-          "http_requests" => 0,
-          "errors" => 0
-        }
+        @measurements = MEASUREMENT_SIGNALS.index_with(0)
         @attributions = Hash.new { |hash, key| hash[key] = [] }
       end
 
@@ -27,7 +21,7 @@ module Plywo
         yield
         @measurements.merge("duration_ms" => elapsed_ms(started_at))
       rescue StandardError
-        @measurements["errors"] += 1
+        @measurements["errors"] += 1 if @measurements["errors"].zero?
         raise
       ensure
         subscribers&.each { |subscriber| ActiveSupport::Notifications.unsubscribe(subscriber) }
@@ -37,57 +31,34 @@ module Plywo
 
       def subscribe
         [
-          ActiveSupport::Notifications.subscribe("sql.active_record") { |event| record_sql(event.payload) },
-          ActiveSupport::Notifications.subscribe("enqueue.active_job") { record_job },
-          ActiveSupport::Notifications.subscribe("enqueue_at.active_job") { record_job },
-          ActiveSupport::Notifications.subscribe("deliver.action_mailer") { record_email },
-          ActiveSupport::Notifications.subscribe(NetHttpInstrumentation::EVENT_NAME) { record_http_request },
-          ActiveSupport::Notifications.subscribe("process_action.action_controller") { |event| record_action(event.payload) },
-          ActiveSupport::Notifications.subscribe(Evidence::EVENT_NAME) { |event| record_side_effect(event.payload) },
+          ActiveSupport::Notifications.subscribe(Evidence::OBSERVATION_EVENT_NAME) { |event| record_observation(event.payload) },
           ActiveSupport::Notifications.subscribe(Evidence::ATTRIBUTION_EVENT_NAME) { |event| record_attribution(event.payload) }
         ]
       end
 
-      def record_sql(payload)
-        return unless current_execution?
-        return if payload[:cached]
-        return if IGNORED_SQL_NAMES.include?(payload[:name].to_s)
-
-        @measurements["sql_queries"] += 1
-        record_runtime_attribution("sql_queries")
-      end
-
-      def record_job
-        return unless current_execution?
-
-        @measurements["background_jobs"] += 1
-        record_runtime_attribution("background_jobs")
-      end
-
-      def record_email
-        return unless current_execution?
-
-        @measurements["emails"] += 1
-        record_runtime_attribution("emails")
-      end
-
-      def record_http_request
-        return unless current_execution?
-
-        @measurements["http_requests"] += 1
-        record_runtime_attribution("http_requests")
-      end
-
-      def record_action(payload)
-        return unless current_execution?
-
-        @measurements["errors"] += 1 if payload[:exception] || payload[:exception_object]
-      end
-
-      def record_side_effect(payload)
+      def record_observation(payload)
         return unless payload[:execution_id].to_s == @execution_id.to_s
 
-        @measurements["emails"] += 1 if payload[:type].to_s == "email"
+        signal = payload.fetch(:signal).to_s
+        return unless MEASUREMENT_SIGNALS.include?(signal)
+
+        @measurements[signal] += 1
+        append_observation_source(signal, payload[:source])
+      end
+
+      def append_observation_source(signal, source)
+        return unless source.respond_to?(:to_h)
+
+        location = source.to_h.symbolize_keys
+        return unless location[:path] && location[:start_line]
+
+        append_attribution(
+          signal,
+          path: location.fetch(:path).to_s,
+          start_line: Integer(location.fetch(:start_line)),
+          end_line: Integer(location.fetch(:end_line, location.fetch(:start_line))),
+          confidence: location.fetch(:confidence, "runtime").to_s
+        )
       end
 
       def record_attribution(payload)
@@ -102,13 +73,6 @@ module Plywo
         )
       end
 
-      def record_runtime_attribution(signal)
-        source = SourceLocator.call
-        return unless source
-
-        append_attribution(signal, **source, confidence: "runtime")
-      end
-
       def append_attribution(signal, path:, start_line:, end_line:, confidence:)
         location = {
           "path" => path,
@@ -117,10 +81,6 @@ module Plywo
           "confidence" => confidence
         }
         @attributions[signal] << location unless @attributions[signal].include?(location)
-      end
-
-      def current_execution?
-        Current.plywo_execution_id.to_s == @execution_id.to_s
       end
 
       def monotonic_time
