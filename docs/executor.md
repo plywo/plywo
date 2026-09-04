@@ -33,11 +33,11 @@ context.candidate_repository
 
 The executor request deliberately excludes control-plane credentials and delivery internals. In particular it must not contain a GitHub App private key, installation token, webhook secret, installation ID, or webhook delivery ID.
 
-A future remote executor may receive a separate short-lived capability for cloning a private repository, but that capability is not part of the stable execution request contract.
+A remote executor may receive a separate short-lived capability for cloning a private repository, but that capability is not part of the stable execution request contract.
 
 ## Portable result
 
-`Plywo::Executor::Result` schema version `1` turns the executor boundary into a two-way serialized contract.
+`Plywo::Executor::Result` schema version `1` is the return contract for every executor adapter.
 
 A successful result contains the behavioral payload. A failed result contains only the source error class and message. Exception objects never cross the boundary.
 
@@ -49,11 +49,13 @@ error_class
 error_message
 ```
 
+Adapters consume `Plywo::Executor::Request` and return `Plywo::Executor::Result`. `PlywoExecutorJob` fails closed if an adapter returns an unversioned application payload instead of the portable result contract.
+
 ## Dispatch lifecycle
 
 The GitHub orchestration job claims the durable execution and performs the first exact base/head check before enqueueing `PlywoExecutorJob` with a plain request hash.
 
-`PlywoExecutorJob` reconstructs the request, runs the selected adapter, converts either the payload or exception into `Plywo::Executor::Result`, and enqueues `GithubPullRequestExecutionFinalizeJob`.
+`PlywoExecutorJob` reconstructs the request, invokes the selected adapter, and enqueues `GithubPullRequestExecutionFinalizeJob` with `Result.to_h`. If the adapter itself raises before returning a result, the job converts that transport/adapter exception into a failed portable result.
 
 The finalizer is back inside the control-plane trust boundary. It renews the still-live execution lease, refreshes GitHub state, rejects stale results, classifies the durable execution, and publishes the Check Run and PR comment.
 
@@ -63,7 +65,7 @@ GithubPullRequestExecutionJob
   -> GitHub preflight
   -> Request.to_h
   -> PlywoExecutorJob
-       -> adapter
+       -> adapter(Request)
        -> Result.to_h
   -> GithubPullRequestExecutionFinalizeJob
        -> renew live lease
@@ -94,11 +96,44 @@ The control plane then publishes the normal `INFRA_FAILURE` Check and comment. P
 
 ## Adapters
 
-`PLYWO_EXECUTOR=local` selects the current development adapter. It uses the exact-worktree + isolated PostgreSQL + Solid Queue implementation behind `Plywo::Github::LocalPullRequestRunner`.
+### Local
+
+`PLYWO_EXECUTOR=local` selects the development adapter. It uses the exact-worktree + isolated PostgreSQL + Solid Queue implementation behind `Plywo::Github::LocalPullRequestRunner` and wraps either its payload or exception in `Plywo::Executor::Result`.
 
 `PLYWO_GITHUB_EXECUTION_MODE=local` remains a temporary compatibility fallback for existing Development App setups.
 
-Production must not assume a local clone on the Rails web/control-plane host. A future remote adapter should consume the same versioned request contract and return the same versioned result contract without changing GitHub orchestration or policy code.
+### Remote HTTP
+
+`PLYWO_EXECUTOR=remote` selects `Plywo::Executor::HttpAdapter`.
+
+Required settings:
+
+```text
+PLYWO_REMOTE_EXECUTOR_URL=https://executor.example.com/v1/executions
+PLYWO_REMOTE_EXECUTOR_TOKEN=...
+```
+
+Optional transport settings:
+
+```text
+PLYWO_REMOTE_EXECUTOR_OPEN_TIMEOUT_SECONDS=5
+PLYWO_REMOTE_EXECUTOR_READ_TIMEOUT_SECONDS=2100
+```
+
+The adapter sends one `POST` containing `Request.to_h` JSON and expects one `Result.to_h` JSON response. Requests include:
+
+```text
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer <executor service token>
+Idempotency-Key: <execution_id>:<attempt_number>
+```
+
+The bearer token authenticates the control plane to the executor service. It is not a GitHub token and is never added to the stable request body. The idempotency key gives a remote service a stable identity for duplicate transport submissions of the same attempt.
+
+A non-2xx response, invalid JSON, or invalid result schema becomes a transport `INFRA_FAILURE`; a valid failed `Result` preserves the remote worker's original error class and message through finalization.
+
+This slice implements the outbound control-plane transport. It does not yet implement or deploy the remote executor HTTP service itself.
 
 ## Trust boundary
 
@@ -114,6 +149,8 @@ The executor can report observations and execution failures. It does not decide 
 
 This keeps an executor replaceable: local process, container, VM, Kubernetes job, or another disposable worker can implement the same boundary.
 
-## Remote heartbeat boundary
+## Next remote-runtime boundary
 
-The current local adapter normally completes well inside the default lease. A future long-running remote executor should renew its lease through a narrow authenticated control-plane heartbeat endpoint rather than receiving database access or GitHub credentials. That heartbeat protocol is intentionally deferred to the remote-executor slice.
+The next slice should implement a small authenticated executor service that accepts the HTTP request contract and runs in a separate trust/deployment role with no GitHub App credentials.
+
+Long-running remote work also needs a narrow authenticated heartbeat/cancellation protocol so the executor can renew its lease while useful work is still progressing without receiving database access or GitHub credentials.

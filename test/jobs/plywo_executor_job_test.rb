@@ -16,7 +16,7 @@ class PlywoExecutorJobTest < ActiveJob::TestCase
   end
 
   test "reconstructs the portable request and forwards a successful result" do
-    executor = counting_executor(payload)
+    executor = counting_executor(Plywo::Executor::Result.success(payload))
     finalizer = counting_finalizer
 
     perform_job(executor:, finalizer:)
@@ -32,11 +32,31 @@ class PlywoExecutorJobTest < ActiveJob::TestCase
     assert_equal payload, result.payload
   end
 
-  test "converts executor exceptions into a portable failure result" do
+  test "preserves a portable executor failure result" do
+    failure = Plywo::Executor::Result.new(
+      schema_version: "1",
+      status: "failed",
+      payload: nil,
+      error_class: "RemoteWorker::CheckoutError",
+      error_message: "repository unavailable"
+    )
+    finalizer = counting_finalizer
+
+    perform_job(executor: counting_executor(failure), finalizer:)
+
+    _execution_id, result_payload = finalizer.calls.first
+    result = Plywo::Executor::Result.from_h(result_payload)
+
+    assert result.failure?
+    assert_equal "RemoteWorker::CheckoutError", result.error_class
+    assert_equal "repository unavailable", result.error_message
+  end
+
+  test "converts adapter exceptions into a portable failure result" do
     finalizer = counting_finalizer
 
     perform_job(
-      executor: failing_executor(RuntimeError.new("worker unavailable")),
+      executor: failing_executor(RuntimeError.new("transport unavailable")),
       finalizer:
     )
 
@@ -46,7 +66,20 @@ class PlywoExecutorJobTest < ActiveJob::TestCase
     assert_equal "github-123", execution_id
     assert result.failure?
     assert_equal "RuntimeError", result.error_class
-    assert_equal "worker unavailable", result.error_message
+    assert_equal "transport unavailable", result.error_message
+  end
+
+  test "fails closed when an adapter returns an unversioned payload" do
+    finalizer = counting_finalizer
+
+    perform_job(executor: counting_executor(payload), finalizer:)
+
+    _execution_id, result_payload = finalizer.calls.first
+    result = Plywo::Executor::Result.from_h(result_payload)
+
+    assert result.failure?
+    assert_equal "TypeError", result.error_class
+    assert_equal "Executor adapter must return Plywo::Executor::Result", result.error_message
   end
 
   private

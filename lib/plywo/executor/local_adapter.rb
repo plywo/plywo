@@ -6,7 +6,9 @@ module Plywo
       end
 
       def call(request:)
-        @runner.call(execution: request)
+        Result.success(@runner.call(execution: request))
+      rescue StandardError => error
+        Result.failure(error)
       end
     end
   end

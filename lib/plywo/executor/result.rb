@@ -7,12 +7,17 @@ module Plywo
       :error_class,
       :error_message
     ) do
-      SCHEMA_VERSION = "1".freeze
-      STATUSES = %w[succeeded failed].freeze
+      def self.current_schema_version
+        "1"
+      end
+
+      def self.statuses
+        @statuses ||= %w[succeeded failed].freeze
+      end
 
       def self.success(payload)
         new(
-          schema_version: SCHEMA_VERSION,
+          schema_version: current_schema_version,
           status: "succeeded",
           payload:,
           error_class: nil,
@@ -22,7 +27,7 @@ module Plywo
 
       def self.failure(error)
         new(
-          schema_version: SCHEMA_VERSION,
+          schema_version: current_schema_version,
           status: "failed",
           payload: nil,
           error_class: error.class.to_s,
@@ -33,10 +38,12 @@ module Plywo
       def self.from_h(payload)
         payload = payload.transform_keys(&:to_s)
         schema_version = payload.fetch("schema_version")
-        raise ArgumentError, "Unsupported executor result schema #{schema_version.inspect}" unless schema_version == SCHEMA_VERSION
+        unless schema_version == current_schema_version
+          raise ArgumentError, "Unsupported executor result schema #{schema_version.inspect}"
+        end
 
         status = payload.fetch("status")
-        raise ArgumentError, "Unsupported executor result status #{status.inspect}" unless STATUSES.include?(status)
+        raise ArgumentError, "Unsupported executor result status #{status.inspect}" unless statuses.include?(status)
 
         new(
           schema_version:,
