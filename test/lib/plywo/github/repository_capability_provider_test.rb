@@ -1,7 +1,19 @@
 require "test_helper"
 
 class PlywoGithubRepositoryCapabilityProviderTest < ActiveSupport::TestCase
-  Execution = Data.define(:context)
+  Execution = Data.define(
+    :context,
+    :status,
+    :scenario_id,
+    :baseline_sha,
+    :candidate_sha,
+    :attempt_count,
+    :lease_expired
+  ) do
+    def lease_expired?
+      lease_expired
+    end
+  end
 
   class ExecutionModel
     def initialize(execution)
@@ -29,14 +41,9 @@ class PlywoGithubRepositoryCapabilityProviderTest < ActiveSupport::TestCase
     end
   end
 
-  test "mints a repository-scoped contents-read installation token" do
+  test "mints a repository-scoped contents-read token for the exact live attempt" do
     authentication = Authentication.new
-    provider = Plywo::Github::RepositoryCapabilityProvider.new(
-      execution_model: ExecutionModel.new(
-        Execution.new(context: { "installation_id" => 159_078_958 })
-      ),
-      authentication:
-    )
+    provider = provider_for(execution: running_execution, authentication:)
 
     capability = provider.call(request: executor_request)
 
@@ -53,16 +60,73 @@ class PlywoGithubRepositoryCapabilityProviderTest < ActiveSupport::TestCase
 
   test "does not mint a capability without durable GitHub installation context" do
     authentication = Authentication.new
-    provider = Plywo::Github::RepositoryCapabilityProvider.new(
-      execution_model: ExecutionModel.new(nil),
-      authentication:
-    )
+    provider = provider_for(execution: nil, authentication:)
 
     assert_nil provider.call(request: executor_request)
     assert_empty authentication.calls
   end
 
+  test "rejects a capability request that does not match the durable attempt" do
+    authentication = Authentication.new
+    provider = provider_for(execution: running_execution, authentication:)
+    mismatched = Plywo::Executor::Request.new(
+      schema_version: executor_request.schema_version,
+      execution_id: executor_request.execution_id,
+      scenario_id: executor_request.scenario_id,
+      baseline_sha: executor_request.baseline_sha,
+      candidate_sha: "different-head",
+      attempt_number: executor_request.attempt_number,
+      context: executor_request.context
+    )
+
+    error = assert_raises(Plywo::Github::RepositoryCapabilityProvider::Error) do
+      provider.call(request: mismatched)
+    end
+
+    assert_equal "Repository capability request does not match the durable execution attempt", error.message
+    assert_empty authentication.calls
+  end
+
+  test "rejects capability minting after the execution is no longer live" do
+    authentication = Authentication.new
+    provider = provider_for(
+      execution: running_execution(status: "completed"),
+      authentication:
+    )
+
+    error = assert_raises(Plywo::Github::RepositoryCapabilityProvider::Error) do
+      provider.call(request: executor_request)
+    end
+
+    assert_equal "Repository capability can only be minted for a live running execution", error.message
+    assert_empty authentication.calls
+  end
+
   private
+
+  def provider_for(execution:, authentication:)
+    Plywo::Github::RepositoryCapabilityProvider.new(
+      execution_model: ExecutionModel.new(execution),
+      authentication:
+    )
+  end
+
+  def running_execution(status: "running")
+    Execution.new(
+      context: {
+        "installation_id" => 159_078_958,
+        "repository" => "plywo/plywo",
+        "candidate_repository" => "plywo/plywo",
+        "pull_request_number" => 40
+      },
+      status:,
+      scenario_id: "scenario",
+      baseline_sha: "base",
+      candidate_sha: "head",
+      attempt_count: 1,
+      lease_expired: false
+    )
+  end
 
   def executor_request
     Plywo::Executor::Request.new(
