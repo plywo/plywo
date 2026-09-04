@@ -27,7 +27,9 @@ module Plywo
         end
 
         def serve(client)
-          client.gets until $_ == "\r\n"
+          while (line = client.gets)
+            break if line == "\r\n"
+          end
           client.write(RESPONSE)
         ensure
           client.close
