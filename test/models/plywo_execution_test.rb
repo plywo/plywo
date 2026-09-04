@@ -1,17 +1,49 @@
 require "test_helper"
 
 class PlywoExecutionTest < ActiveSupport::TestCase
-  test "claims a queued execution once and increments attempts" do
+  test "claims a queued execution once, increments attempts, and creates a lease" do
     execution = create_execution
+    now = Time.utc(2026, 9, 4, 20, 0, 0)
 
-    assert execution.claim!
+    assert execution.claim!(now:, lease_seconds: 120)
     assert_equal "running", execution.status
     assert_equal 1, execution.attempt_count
-    assert execution.started_at
-    refute execution.claim!
+    assert_equal now, execution.started_at
+    assert_equal now, execution.heartbeat_at
+    assert_equal now + 120, execution.lease_expires_at
+    refute execution.claim!(now: now + 1, lease_seconds: 120)
   end
 
-  test "stores the behavioral outcome on completion" do
+  test "renews only a live running lease" do
+    execution = create_execution
+    now = Time.utc(2026, 9, 4, 20, 0, 0)
+    execution.claim!(now:, lease_seconds: 120)
+
+    assert execution.renew_lease!(now: now + 60, lease_seconds: 180)
+    assert_equal now + 60, execution.heartbeat_at
+    assert_equal now + 240, execution.lease_expires_at
+
+    refute execution.renew_lease!(now: now + 241, lease_seconds: 180)
+    assert execution.lease_expired?(at: now + 241)
+  end
+
+  test "atomically expires an overdue running lease as infrastructure failure" do
+    execution = create_execution
+    now = Time.utc(2026, 9, 4, 20, 0, 0)
+    execution.claim!(now:, lease_seconds: 120)
+
+    refute execution.expire_lease!(now: now + 119)
+    assert execution.expire_lease!(now: now + 120)
+
+    assert_equal "failed", execution.status
+    assert_equal "infra_failure", execution.outcome
+    assert_match(/Plywo::Executor::LeaseExpired/, execution.failure)
+    assert_nil execution.lease_expires_at
+    assert execution.rerunnable?
+    refute execution.expire_lease!(now: now + 121)
+  end
+
+  test "stores the behavioral outcome on completion and closes the lease" do
     execution = create_execution
     execution.claim!
 
@@ -26,6 +58,7 @@ class PlywoExecutionTest < ActiveSupport::TestCase
     assert_equal "allow", execution.outcome
     assert_equal payload, execution.result
     assert execution.finished_at
+    assert_nil execution.lease_expires_at
   end
 
   test "classifies failures as rerunnable infrastructure failures" do
@@ -35,6 +68,7 @@ class PlywoExecutionTest < ActiveSupport::TestCase
 
     assert_equal "failed", execution.status
     assert_equal "infra_failure", execution.outcome
+    assert_nil execution.lease_expires_at
     assert execution.rerunnable?
 
     assert execution.requeue!
@@ -42,6 +76,8 @@ class PlywoExecutionTest < ActiveSupport::TestCase
     assert_nil execution.outcome
     assert_nil execution.failure
     assert_nil execution.started_at
+    assert_nil execution.heartbeat_at
+    assert_nil execution.lease_expires_at
     assert_nil execution.finished_at
     assert_equal 1, execution.attempt_count
 
@@ -67,6 +103,7 @@ class PlywoExecutionTest < ActiveSupport::TestCase
 
     assert_equal "ignored", execution.status
     assert_equal "stale", execution.outcome
+    assert_nil execution.lease_expires_at
     refute execution.rerunnable?
   end
 
