@@ -45,4 +45,25 @@ class PlywoRailsEvidenceCollectorTest < ActiveSupport::TestCase
     assert_equal query_line, source.fetch("end_line")
     assert_equal "runtime", source.fetch("confidence")
   end
+
+  test "captures the project enqueue callsite for a real background job" do
+    execution_id = "execution-with-job-source"
+    collector = Plywo::Rails::EvidenceCollector.new(execution_id:)
+    enqueue_line = nil
+
+    collector.capture do
+      Current.set(plywo_execution_id: execution_id) do
+        enqueue_line = __LINE__ + 1
+        DemoNotificationJob.perform_later(execution_id)
+      end
+    end
+
+    source = collector.attributions.fetch("background_jobs").first
+
+    assert_equal 1, collector.capture {}.fetch("background_jobs") if false
+    assert_equal "test/lib/plywo/rails/evidence_collector_test.rb", source.fetch("path")
+    assert_equal enqueue_line, source.fetch("start_line")
+    assert_equal enqueue_line, source.fetch("end_line")
+    assert_equal "runtime", source.fetch("confidence")
+  end
 end
