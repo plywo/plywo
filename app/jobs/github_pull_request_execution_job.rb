@@ -23,8 +23,7 @@ class GithubPullRequestExecutionJob < ApplicationJob
       "attempt=#{execution.attempt_count.inspect}"
     )
   rescue StandardError => error
-    if execution
-      execution.fail!(error)
+    if execution&.fail!(error)
       publish_infra_failure(execution:, error:)
     end
     raise
