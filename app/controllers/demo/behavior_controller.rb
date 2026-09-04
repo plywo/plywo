@@ -19,7 +19,11 @@ module Demo
       end
 
       profile.fetch(:background_jobs).times do
-        DemoNotificationJob.perform_later
+        if Current.plywo_subject == "git-comparison"
+          DemoNotificationJob.set(wait_until: Time.current + 0.25).perform_later
+        else
+          DemoNotificationJob.perform_later
+        end
       end
 
       profile.fetch(:emails).times do
