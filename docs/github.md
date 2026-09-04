@@ -59,7 +59,24 @@ finding.source
 GitHub annotation
 ```
 
-For Rails SQL evidence, Plywo captures the synchronous application callsite from `sql.active_record` and excludes dependency/runtime paths such as `vendor/`, `tmp/`, and `.bundle/`. This instrumentation is intended for Plywo executions such as CI and test environments, not as an always-on production profiler by default.
+### Rails runtime sources
+
+`Plywo::Rails::SourceLocator` is the shared project-callsite primitive for synchronous Rails signals. It excludes Plywo internals and dependency/runtime paths such as `vendor/`, `tmp/`, `.bundle/`, `log/`, and `storage/`, then returns the first application-owned frame.
+
+Current automatic integrations:
+
+```text
+sql.active_record       -> SQL execution site
+                                           
+enqueue.active_job      -> background-job enqueue site
+enqueue_at.active_job   -> scheduled-job enqueue site
+```
+
+The captured runtime source means "where this observed behavior happened". It is not necessarily the root cause of why a PR changed the behavior. For example, a changed configuration or loop count can create an extra job while the runtime source correctly points to an unchanged `perform_later` line. Future causal analysis may connect runtime sites to changed-code cause candidates, but GitHub annotations must not claim that inference today.
+
+Background-job count changes currently produce a medium-severity `SIDE_EFFECT_CHANGED` finding, so their default merge recommendation is `REVIEW` rather than `BLOCK`. A trusted runtime enqueue source can still produce a warning annotation on the neutral Check.
+
+This instrumentation is intended for Plywo executions such as CI and test environments, not as an always-on production profiler by default.
 
 `Plywo::Rails::Evidence.attribute_next_line` remains a low-level explicit override. Keep the call on one physical line and place it immediately above the causal line that should receive the annotation. For integrations that already know the exact location, prefer `Plywo::Rails::Evidence.attribute(..., line:)`.
 
@@ -70,7 +87,7 @@ Agents should never be required to parse the PR comment, Check Run, or annotatio
 ```text
 PR comment -> What changed?
 Check      -> Can this merge?
-Annotation -> Where is a confidently attributed source?
+Annotation -> Where is a confidently attributed runtime source?
 Plywo UI   -> Why did it happen?
 API/MCP    -> What should an agent do next?
 ```
