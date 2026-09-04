@@ -6,14 +6,13 @@ module Demo
       "warmup" => { sql_queries: 0, background_jobs: 0, emails: 0, delay_ms: 0 },
       "baseline" => { sql_queries: 14, background_jobs: 1, emails: 1, delay_ms: 15 },
       "candidate" => { sql_queries: 47, background_jobs: 3, emails: 2, delay_ms: 90 },
-      "git-comparison" => { sql_queries: 14, background_jobs: 1, emails: 1, delay_ms: 15 }
+      "git-comparison" => { sql_queries: 18, background_jobs: 1, emails: 1, delay_ms: 15 }
     }.freeze
 
     def create
       profile = PROFILES.fetch(Current.plywo_subject.to_s, PROFILES.fetch("baseline"))
 
       ApplicationRecord.uncached do
-        Plywo::Rails::Evidence.attribute_next_line("sql_queries", path: "app/controllers/demo/behavior_controller.rb")
         profile.fetch(:sql_queries).times do
           ApplicationRecord.connection.select_value("SELECT 1")
         end
