@@ -62,6 +62,7 @@ jobs:
       - name: Prepare real Git subjects
         if: github.event_name == 'pull_request'
         run: |
+          git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" > /tmp/plywo-changed-paths.txt
           git worktree add --detach /tmp/plywo-base "${{ github.event.pull_request.base.sha }}"
           git worktree add --detach /tmp/plywo-candidate "${{ github.event.pull_request.head.sha }}"
 
@@ -114,6 +115,7 @@ jobs:
         env:
           PLYWO_BASELINE_INPUT: /tmp/plywo-base.json
           PLYWO_CANDIDATE_INPUT: /tmp/plywo-candidate.json
+          PLYWO_CHANGED_PATHS: /tmp/plywo-changed-paths.txt
           PLYWO_OUTPUT: tmp/plywo-git-comparison.json
         run: bin/rails plywo:compare_executions
 

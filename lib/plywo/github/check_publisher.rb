@@ -10,15 +10,17 @@ module Plywo
         @api_url = api_url.sub(%r{/+$}, "")
       end
 
-      def upsert(repository:, head_sha:, name:, external_id:, details_url:, conclusion:, title:, summary:)
+      def upsert(repository:, head_sha:, name:, external_id:, details_url:, conclusion:, title:, summary:, annotations: [])
         existing = find_existing(repository:, head_sha:, name:)
+        output = { title:, summary: }
+        output[:annotations] = annotations.first(50) unless annotations.empty?
         body = {
           name:,
           status: "completed",
           conclusion:,
           external_id:,
           details_url:,
-          output: { title:, summary: }
+          output:
         }
 
         if existing
