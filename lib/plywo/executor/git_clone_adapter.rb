@@ -67,7 +67,7 @@ module Plywo
         run!(
           env: git_auth_environment(repository_capability:),
           command: [
-            "git", "fetch", "--no-tags", "--filter=blob:none", "origin",
+            "git", "fetch", "--no-tags", "origin",
             "+refs/heads/#{baseline_ref}:refs/remotes/origin/plywo-base",
             "+refs/pull/#{pull_request_number}/head:refs/remotes/origin/plywo-candidate"
           ],
