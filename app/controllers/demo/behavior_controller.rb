@@ -13,10 +13,7 @@ module Demo
       profile = PROFILES.fetch(Current.plywo_subject.to_s, PROFILES.fetch("baseline"))
 
       ApplicationRecord.uncached do
-        Plywo::Rails::Evidence.attribute_next_line(
-          "sql_queries",
-          path: "app/controllers/demo/behavior_controller.rb"
-        )
+        Plywo::Rails::Evidence.attribute_next_line("sql_queries", path: "app/controllers/demo/behavior_controller.rb")
         profile.fetch(:sql_queries).times do
           ApplicationRecord.connection.select_value("SELECT 1")
         end
