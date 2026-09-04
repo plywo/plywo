@@ -93,10 +93,11 @@ module Plywo
       return false unless candidate > baseline
 
       delta = candidate - baseline
-      checks = []
-      checks << delta > policy.fetch(:threshold_absolute) if policy.key?(:threshold_absolute)
-      checks << percent_change(baseline, candidate) > policy.fetch(:threshold_percent) if policy.key?(:threshold_percent)
-      checks.all?
+      absolute_regression = !policy.key?(:threshold_absolute) || delta > policy.fetch(:threshold_absolute)
+      percentage_regression = !policy.key?(:threshold_percent) ||
+        percent_change(baseline, candidate) > policy.fetch(:threshold_percent)
+
+      absolute_regression && percentage_regression
     end
 
     def display_delta(delta, delta_percent)
