@@ -10,7 +10,8 @@ class PlywoExecutorHttpAdapterTest < ActiveSupport::TestCase
 
     result = adapter.call(request: executor_request)
 
-    call = transport.calls.one
+    assert_equal 1, transport.calls.length
+    call = transport.calls.first
     assert_equal "https", call.fetch(:uri).scheme
     assert_equal "executor.example.test", call.fetch(:uri).host
     assert_equal "/v1/executions", call.fetch(:uri).path
