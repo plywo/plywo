@@ -17,10 +17,10 @@ module Plywo
 
       def capture
         subscribers = subscribe
-        started_at = monotonic_time
-        internal_started_at = InternalOperation.elapsed_seconds
+        started_at = RuntimeProbe.snapshot
+        internal_started_at = InternalOperation.snapshot
         yield
-        @measurements.merge("duration_ms" => elapsed_ms(started_at, internal_started_at))
+        @measurements.merge(runtime_measurements(started_at, internal_started_at))
       rescue StandardError
         @measurements["errors"] += 1 if @measurements["errors"].zero?
         raise
@@ -84,15 +84,17 @@ module Plywo
         @attributions[signal] << location unless @attributions[signal].include?(location)
       end
 
-      def monotonic_time
-        Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      end
+      def runtime_measurements(started_at, internal_started_at)
+        elapsed = RuntimeProbe.elapsed_ms(
+          started_at,
+          subtract_seconds: InternalOperation.delta_since(internal_started_at)
+        )
 
-      def elapsed_ms(started_at, internal_started_at)
-        wall_elapsed = monotonic_time - started_at
-        internal_elapsed = InternalOperation.elapsed_seconds - internal_started_at
-        product_elapsed = [ wall_elapsed - internal_elapsed, 0.0 ].max
-        (product_elapsed * 1000).round(1)
+        {
+          "duration_ms" => elapsed.fetch(:wall, 0.0),
+          "process_cpu_ms" => elapsed.fetch(:process_cpu, 0.0),
+          "thread_cpu_ms" => elapsed.fetch(:thread_cpu, 0.0)
+        }
       end
     end
   end

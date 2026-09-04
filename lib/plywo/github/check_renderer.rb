@@ -61,10 +61,20 @@ module Plywo
         lines.concat([ "", "| Signal | Baseline | Candidate | Change |", "| --- | ---: | ---: | ---: |" ])
 
         result.fetch("signals").each do |signal, values|
-          marker = values.fetch("regression") ? " ⚠️" : ""
+          marker = if !values.fetch("available", true)
+            " ➖"
+          elsif !values.fetch("decision_relevant", true)
+            " ℹ️"
+          elsif values.fetch("regression")
+            " ⚠️"
+          else
+            ""
+          end
           lines << "| #{SIGNAL_LABELS.fetch(signal, signal)} | #{format_value(signal, values.fetch("baseline"))} | " \
             "#{format_value(signal, values.fetch("candidate"))} | #{values.fetch("display_delta")}#{marker} |"
         end
+
+        lines.concat(runtime_diagnosis_lines)
 
         unless findings.empty?
           lines.concat([ "", "### Findings", "" ])
@@ -75,6 +85,22 @@ module Plywo
         end
 
         lines.join("\n")
+      end
+
+      def runtime_diagnosis_lines
+        diagnosis = result.fetch("runtime_diagnosis", {})
+        return [] if diagnosis.empty?
+
+        lines = [ "", "### Runtime diagnosis", "", "| Scope | Baseline | Candidate | Candidate CPU ratio |", "| --- | --- | --- | ---: |" ]
+        %w[request worker].each do |scope|
+          profile = diagnosis[scope]
+          next unless profile
+
+          baseline = profile.fetch("baseline")
+          candidate = profile.fetch("candidate")
+          lines << "| #{scope.capitalize} | #{classification(baseline)} | #{classification(candidate)} | #{format_ratio(candidate.fetch("cpu_ratio_percent"))} |"
+        end
+        lines
       end
 
       def annotations
@@ -109,7 +135,17 @@ module Plywo
       end
 
       def format_value(signal, value)
-        signal == "duration_ms" ? format("%.1f ms", value) : value.to_i.to_s
+        return "n/a" if value.nil?
+
+        signal.end_with?("_ms") ? format("%.1f ms", value) : value.to_i.to_s
+      end
+
+      def classification(profile)
+        profile.fetch("classification", "unknown").tr("_", " ")
+      end
+
+      def format_ratio(value)
+        value.nil? ? "n/a" : "#{format("%.1f", value)}%"
       end
 
       def display_percent(value)

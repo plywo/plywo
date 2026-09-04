@@ -7,6 +7,29 @@ module Plywo
         threshold_absolute: 20.0,
         severity: "high"
       },
+      "process_cpu_ms" => { decision: false, optional: true },
+      "thread_cpu_ms" => {
+        reason_code: "CPU_TIME_REGRESSION",
+        threshold_percent: 30.0,
+        threshold_absolute: 10.0,
+        severity: "medium",
+        optional: true
+      },
+      "worker_wall_ms" => {
+        reason_code: "WORKER_LATENCY_REGRESSION",
+        threshold_percent: 20.0,
+        threshold_absolute: 20.0,
+        severity: "medium",
+        optional: true
+      },
+      "worker_process_cpu_ms" => { decision: false, optional: true },
+      "worker_thread_cpu_ms" => {
+        reason_code: "CPU_TIME_REGRESSION",
+        threshold_percent: 30.0,
+        threshold_absolute: 10.0,
+        severity: "medium",
+        optional: true
+      },
       "sql_queries" => { reason_code: "DATABASE_QUERY_REGRESSION", threshold_percent: 25.0, severity: "high" },
       "background_jobs" => { reason_code: "SIDE_EFFECT_CHANGED", threshold_absolute: 0, severity: "medium" },
       "emails" => { reason_code: "SIDE_EFFECT_CHANGED", threshold_absolute: 0, severity: "high" },
@@ -28,11 +51,17 @@ module Plywo
       findings = []
 
       SIGNALS.each do |signal, policy|
+        unless comparable?(signal, policy)
+          signals[signal] = unavailable_signal(signal, policy)
+          next
+        end
+
         baseline_value = numeric(@baseline.fetch(signal, 0))
         candidate_value = numeric(@candidate.fetch(signal, 0))
         delta = candidate_value - baseline_value
         delta_percent = percent_change(baseline_value, candidate_value)
-        regression = regression?(baseline_value, candidate_value, policy)
+        decision_relevant = policy.fetch(:decision, true)
+        regression = decision_relevant && regression?(baseline_value, candidate_value, policy)
 
         signals[signal] = {
           "baseline" => baseline_value,
@@ -40,6 +69,8 @@ module Plywo
           "delta" => delta,
           "delta_percent" => delta_percent,
           "display_delta" => display_delta(delta, delta_percent),
+          "available" => true,
+          "decision_relevant" => decision_relevant,
           "regression" => regression
         }
 
@@ -63,6 +94,7 @@ module Plywo
         "decision" => findings.empty? ? "no_regression" : "regression",
         "merge_recommendation" => block_merge?(findings) ? "block" : (findings.empty? ? "allow" : "review"),
         "signals" => signals,
+        "runtime_diagnosis" => runtime_diagnosis(signals),
         "findings" => findings,
         "recommended_action" => recommended_action(findings)
       }
@@ -72,6 +104,25 @@ module Plywo
 
     def stringify_keys(hash)
       hash.each_with_object({}) { |(key, value), result| result[key.to_s] = value }
+    end
+
+    def comparable?(signal, policy)
+      return true unless policy.fetch(:optional, false)
+
+      @baseline.key?(signal) && @candidate.key?(signal)
+    end
+
+    def unavailable_signal(signal, policy)
+      {
+        "baseline" => @baseline.key?(signal) ? numeric(@baseline.fetch(signal)) : nil,
+        "candidate" => @candidate.key?(signal) ? numeric(@candidate.fetch(signal)) : nil,
+        "delta" => nil,
+        "delta_percent" => nil,
+        "display_delta" => "n/a",
+        "available" => false,
+        "decision_relevant" => policy.fetch(:decision, true),
+        "regression" => false
+      }
     end
 
     def numeric(value)
@@ -105,6 +156,52 @@ module Plywo
 
       sign = delta.positive? ? "+" : ""
       "#{sign}#{delta_percent}%"
+    end
+
+    def runtime_diagnosis(signals)
+      {
+        "request" => runtime_scope_diagnosis(
+          wall: signals.fetch("duration_ms"),
+          thread_cpu: signals.fetch("thread_cpu_ms")
+        ),
+        "worker" => runtime_scope_diagnosis(
+          wall: signals.fetch("worker_wall_ms"),
+          thread_cpu: signals.fetch("worker_thread_cpu_ms")
+        )
+      }
+    end
+
+    def runtime_scope_diagnosis(wall:, thread_cpu:)
+      {
+        "baseline" => runtime_profile(wall, thread_cpu, "baseline"),
+        "candidate" => runtime_profile(wall, thread_cpu, "candidate")
+      }
+    end
+
+    def runtime_profile(wall, thread_cpu, side)
+      return { "classification" => "unknown", "cpu_ratio_percent" => nil } unless wall.fetch("available", true) && thread_cpu.fetch("available", true)
+
+      wall_ms = wall[side]
+      thread_cpu_ms = thread_cpu[side]
+      return { "classification" => "unknown", "cpu_ratio_percent" => nil } if wall_ms.nil? || thread_cpu_ms.nil?
+
+      wall_ms = wall_ms.to_f
+      thread_cpu_ms = thread_cpu_ms.to_f
+      return { "classification" => "unknown", "cpu_ratio_percent" => nil } unless wall_ms.positive?
+
+      ratio = ((thread_cpu_ms / wall_ms) * 100).round(1)
+      classification = if ratio >= 70.0
+        "cpu_bound"
+      elsif ratio <= 30.0
+        "wait_bound"
+      else
+        "mixed"
+      end
+
+      {
+        "classification" => classification,
+        "cpu_ratio_percent" => ratio
+      }
     end
 
     def block_merge?(findings)

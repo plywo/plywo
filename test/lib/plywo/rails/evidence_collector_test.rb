@@ -26,6 +26,8 @@ class PlywoRailsEvidenceCollectorTest < ActiveSupport::TestCase
     assert_equal 1, measurements.fetch("http_requests")
     assert_equal 0, measurements.fetch("errors")
     assert_operator measurements.fetch("duration_ms"), :>=, 0
+    assert_operator measurements.fetch("process_cpu_ms"), :>=, 0
+    assert_operator measurements.fetch("thread_cpu_ms"), :>=, 0
   end
 
   test "excludes Plywo internal operation time from product duration" do
@@ -34,6 +36,16 @@ class PlywoRailsEvidenceCollectorTest < ActiveSupport::TestCase
     end
 
     assert_operator measurements.fetch("duration_ms"), :<, 15.0
+  end
+
+  test "captures wall and CPU clocks independently" do
+    measurements = Plywo::Rails::EvidenceCollector.capture(execution_id: "clock-proof") do
+      sleep 0.03
+    end
+
+    assert_operator measurements.fetch("duration_ms"), :>=, 20.0
+    assert_operator measurements.fetch("thread_cpu_ms"), :<, measurements.fetch("duration_ms")
+    assert_operator measurements.fetch("process_cpu_ms"), :<, measurements.fetch("duration_ms")
   end
 
   test "captures the project callsite for a real SQL query" do
