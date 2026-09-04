@@ -102,7 +102,8 @@ class PlywoExecution < ApplicationRecord
     cancelled == 1
   end
 
-  def complete!(payload, now: Time.current)
+  def complete!(payload = nil, now: Time.current, **keyword_payload)
+    payload ||= keyword_payload
     decision = payload.dig("result", "decision")
     completed = self.class.where(id:, status: LEASED_STATUSES).update_all(
       status: "completed",
