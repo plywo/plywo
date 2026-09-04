@@ -91,7 +91,7 @@ module Plywo
       def elapsed_ms(started_at, internal_started_at)
         wall_elapsed = monotonic_time - started_at
         internal_elapsed = InternalOperation.elapsed_seconds - internal_started_at
-        product_elapsed = [wall_elapsed - internal_elapsed, 0.0].max
+        product_elapsed = [ wall_elapsed - internal_elapsed, 0.0 ].max
         (product_elapsed * 1000).round(1)
       end
     end
