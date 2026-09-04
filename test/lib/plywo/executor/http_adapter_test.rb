@@ -47,6 +47,33 @@ class PlywoExecutorHttpAdapterTest < ActiveSupport::TestCase
     assert_equal executor_request.to_h, JSON.parse(call.fetch(:body))
   end
 
+  test "posts cancellation for the exact execution attempt" do
+    transport = recording_transport(status: 202, body: JSON.generate("status" => "cancelled"))
+
+    result = adapter(transport:).cancel(
+      execution_id: "github-123",
+      attempt_number: 2,
+      reason: "superseded"
+    )
+
+    assert result
+    call = transport.calls.fetch(0)
+    assert_equal "/v1/executions/github-123/attempts/2/cancel", call.fetch(:uri).path
+    assert_equal "Bearer remote-secret", call.fetch(:headers).fetch("Authorization")
+    refute_includes call.fetch(:headers), "Idempotency-Key"
+    assert_equal({ "reason" => "superseded" }, JSON.parse(call.fetch(:body)))
+  end
+
+  test "fails cancellation when the remote executor rejects it" do
+    transport = recording_transport(status: 503, body: "unavailable")
+
+    error = assert_raises(Plywo::Executor::HttpAdapter::Error) do
+      adapter(transport:).cancel(execution_id: "github-123", attempt_number: 2)
+    end
+
+    assert_equal "Remote executor cancellation returned HTTP 503", error.message
+  end
+
   test "preserves a remote worker failure result" do
     remote_failure = Plywo::Executor::Result.new(
       schema_version: "1",
