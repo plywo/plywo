@@ -1,5 +1,5 @@
 class PlywoExecutorCancellationJob < ApplicationJob
-  queue_as :default
+  queue_as :control
 
   def perform(execution_id, attempt_number, reason = "cancelled")
     execution = PlywoExecution.find_by(execution_id:)
