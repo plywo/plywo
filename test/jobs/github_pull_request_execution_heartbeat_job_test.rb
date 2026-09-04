@@ -16,6 +16,22 @@ class GithubPullRequestExecutionHeartbeatJobTest < ActiveJob::TestCase
     assert execution.lease_expires_at > now + 10
   end
 
+  test "renews a finalizing attempt until it reaches a terminal outcome" do
+    now = Time.utc(2026, 9, 5, 0, 30, 0)
+    execution = create_running_execution(now:)
+    execution.begin_finalization!(attempt_number: execution.attempt_count, now: now + 5)
+
+    travel_to(now + 10) do
+      assert_enqueued_jobs 1, only: GithubPullRequestExecutionHeartbeatJob do
+        GithubPullRequestExecutionHeartbeatJob.perform_now(execution.execution_id, execution.attempt_count)
+      end
+    end
+
+    execution.reload
+    assert_equal "finalizing", execution.status
+    assert_equal now + 10, execution.heartbeat_at
+  end
+
   test "does not renew or reschedule a previous attempt" do
     now = Time.utc(2026, 9, 5, 0, 30, 0)
     execution = create_running_execution(now:)
