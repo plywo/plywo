@@ -30,7 +30,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_173000) do
     t.string "status", default: "accepted", null: false
     t.datetime "updated_at", null: false
     t.index ["delivery_id"], name: "index_github_webhook_deliveries_on_delivery_id", unique: true
-    t.index ["repository", "pull_request_number"], name: "index_github_webhook_deliveries_on_repository_and_pull_request_number"
+    t.index ["repository", "pull_request_number"], name: "idx_on_repository_pull_request_number_aa1c3f09bc"
     t.index ["status"], name: "index_github_webhook_deliveries_on_status"
   end
 
