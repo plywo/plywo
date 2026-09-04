@@ -1,10 +1,19 @@
 require "test_helper"
 
 class PlywoExecutorServiceResolverTest < ActiveSupport::TestCase
-  test "resolves only the local worker adapter by default" do
+  test "resolves the local worker adapter by default" do
     adapter = Plywo::Executor::ServiceResolver.from_env(root: Rails.root, env: {})
 
     assert_instance_of Plywo::Executor::LocalAdapter, adapter
+  end
+
+  test "resolves the repository clone worker adapter explicitly" do
+    adapter = Plywo::Executor::ServiceResolver.from_env(
+      root: Rails.root,
+      env: { "PLYWO_EXECUTOR_SERVICE_ADAPTER" => "git_clone" }
+    )
+
+    assert_instance_of Plywo::Executor::GitCloneAdapter, adapter
   end
 
   test "fails closed for an unsupported service adapter" do
