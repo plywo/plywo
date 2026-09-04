@@ -1,5 +1,7 @@
 class PlywoExecution < ApplicationRecord
-  ACTIVE_STATUSES = %w[queued running].freeze
+  ACTIVE_STATUSES = %w[queued running finalizing].freeze
+  CANCELLABLE_STATUSES = %w[queued running].freeze
+  LEASED_STATUSES = %w[running finalizing].freeze
   TERMINAL_STATUSES = %w[completed ignored failed cancelled].freeze
   STATUSES = (ACTIVE_STATUSES + TERMINAL_STATUSES).freeze
   OUTCOMES = %w[allow review block infra_failure stale manual_review_required cancelled].freeze
@@ -35,7 +37,7 @@ class PlywoExecution < ApplicationRecord
 
   def renew_lease!(now: Time.current, lease_seconds: self.class.lease_seconds)
     renewed = self.class
-      .where(id:, status: "running")
+      .where(id:, status: LEASED_STATUSES)
       .where("lease_expires_at > ?", now)
       .update_all(
         heartbeat_at: now,
@@ -48,12 +50,12 @@ class PlywoExecution < ApplicationRecord
   end
 
   def lease_expired?(at: Time.current)
-    status == "running" && lease_expires_at.present? && lease_expires_at <= at
+    LEASED_STATUSES.include?(status) && lease_expires_at.present? && lease_expires_at <= at
   end
 
   def expire_lease!(now: Time.current)
     expired = self.class
-      .where(id:, status: "running")
+      .where(id:, status: LEASED_STATUSES)
       .where("lease_expires_at <= ?", now)
       .update_all(
         status: "failed",
@@ -68,8 +70,18 @@ class PlywoExecution < ApplicationRecord
     expired == 1
   end
 
+  def begin_finalization!(attempt_number:, now: Time.current)
+    finalizing = self.class
+      .where(id:, status: "running", attempt_count: Integer(attempt_number))
+      .where("lease_expires_at > ?", now)
+      .update_all(status: "finalizing", updated_at: now)
+
+    reload if finalizing == 1
+    finalizing == 1
+  end
+
   def cancel!(attempt_number: nil, reason: "cancelled", now: Time.current)
-    scope = self.class.where(id:, status: ACTIVE_STATUSES)
+    scope = self.class.where(id:, status: CANCELLABLE_STATUSES)
     scope = scope.where(attempt_count: Integer(attempt_number)) unless attempt_number.nil?
 
     cancelled = scope.update_all(
@@ -89,44 +101,56 @@ class PlywoExecution < ApplicationRecord
     cancelled == 1
   end
 
-  def complete!(payload)
+  def complete!(payload, now: Time.current)
     decision = payload.dig("result", "decision")
-    update!(
+    completed = self.class.where(id:, status: LEASED_STATUSES).update_all(
       status: "completed",
       decision:,
       outcome: behavioral_outcome(payload),
       result: payload,
       failure: nil,
       lease_expires_at: nil,
-      finished_at: Time.current
+      finished_at: now,
+      updated_at: now
     )
+
+    reload if completed == 1
+    completed == 1
   end
 
-  def ignore!(reason)
+  def ignore!(reason, now: Time.current)
     reason = reason.to_s
     outcome = reason.start_with?("stale") ? "stale" : "manual_review_required"
-    update!(
+    ignored = self.class.where(id:, status: ACTIVE_STATUSES).update_all(
       status: "ignored",
       outcome:,
       failure: reason,
       lease_expires_at: nil,
-      finished_at: Time.current
+      finished_at: now,
+      updated_at: now
     )
+
+    reload if ignored == 1
+    ignored == 1
   end
 
-  def fail!(error)
-    fail_details!(error_class: error.class.to_s, error_message: error.message)
+  def fail!(error, now: Time.current)
+    fail_details!(error_class: error.class.to_s, error_message: error.message, now:)
   end
 
-  def fail_details!(error_class:, error_message:)
+  def fail_details!(error_class:, error_message:, now: Time.current)
     message = "#{error_class}: #{error_message}".truncate(2_000)
-    update!(
+    failed = self.class.where(id:, status: ACTIVE_STATUSES).update_all(
       status: "failed",
       outcome: "infra_failure",
       failure: message,
       lease_expires_at: nil,
-      finished_at: Time.current
+      finished_at: now,
+      updated_at: now
     )
+
+    reload if failed == 1
+    failed == 1
   end
 
   def rerunnable?
