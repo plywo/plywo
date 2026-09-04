@@ -31,7 +31,7 @@ module Plywo
         end
 
         def observe(signal)
-          return if DurableEvidenceBuffer.persisting?
+          return if InternalOperation.active?
           return if Current.plywo_execution_id.nil?
 
           source = SourceLocator.call

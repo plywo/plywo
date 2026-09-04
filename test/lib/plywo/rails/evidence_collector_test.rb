@@ -28,6 +28,14 @@ class PlywoRailsEvidenceCollectorTest < ActiveSupport::TestCase
     assert_operator measurements.fetch("duration_ms"), :>=, 0
   end
 
+  test "excludes Plywo internal operation time from product duration" do
+    measurements = Plywo::Rails::EvidenceCollector.capture(execution_id: "duration-proof") do
+      Plywo::Rails::InternalOperation.call { sleep 0.03 }
+    end
+
+    assert_operator measurements.fetch("duration_ms"), :<, 15.0
+  end
+
   test "captures the project callsite for a real SQL query" do
     execution_id = "execution-with-sql-source"
     collector = Plywo::Rails::EvidenceCollector.new(execution_id:)

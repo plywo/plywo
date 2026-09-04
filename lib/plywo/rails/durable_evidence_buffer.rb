@@ -1,8 +1,6 @@
 module Plywo
   module Rails
     class DurableEvidenceBuffer
-      PERSISTING_KEY = :plywo_durable_evidence_persisting
-
       class << self
         def capture(execution_id:, producer_kind:, producer_name:, producer_id:)
           events = []
@@ -34,7 +32,7 @@ module Plywo
         end
 
         def persisting?
-          ActiveSupport::IsolatedExecutionState[PERSISTING_KEY] == true
+          InternalOperation.active?
         end
 
         private
@@ -104,10 +102,9 @@ module Plywo
         end
 
         def persist(events)
-          ActiveSupport::IsolatedExecutionState[PERSISTING_KEY] = true
-          PlywoEvidenceEvent.insert_all!(events)
-        ensure
-          ActiveSupport::IsolatedExecutionState.delete(PERSISTING_KEY)
+          InternalOperation.call do
+            PlywoEvidenceEvent.insert_all!(events)
+          end
         end
       end
     end
