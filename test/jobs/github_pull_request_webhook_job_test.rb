@@ -1,6 +1,17 @@
 require "test_helper"
 
 class GithubPullRequestWebhookJobTest < ActiveJob::TestCase
+  class FakeExecutionJob
+    class << self
+      attr_accessor :enqueued_ids
+
+      def perform_later(execution_id)
+        self.enqueued_ids ||= []
+        enqueued_ids << execution_id
+      end
+    end
+  end
+
   class TestJob < GithubPullRequestWebhookJob
     attr_accessor :authentication_override, :client_override
 
@@ -15,14 +26,45 @@ class GithubPullRequestWebhookJobTest < ActiveJob::TestCase
 
       client_override
     end
+
+    def execution_job_class
+      FakeExecutionJob
+    end
   end
 
-  test "authenticates the installation and completes a current execution trigger" do
-    delivery = create_delivery(action: "synchronize")
-    perform_job(delivery:, head_sha: "head-sha")
+  setup do
+    FakeExecutionJob.enqueued_ids = []
+  end
 
+  test "authenticates the installation and queues a durable current execution" do
+    delivery = create_delivery(action: "synchronize")
+
+    assert_difference("PlywoExecution.count", 1) do
+      perform_job(delivery:, head_sha: "head-sha")
+    end
+
+    execution = PlywoExecution.last
     assert_equal "completed", delivery.reload.status
     assert_nil delivery.failure
+    assert_equal "queued", execution.status
+    assert_equal "github_pull_request", execution.source
+    assert_equal "base-sha", execution.baseline_sha
+    assert_equal "head-sha", execution.candidate_sha
+    assert_equal "plywo/plywo", execution.context.fetch("repository")
+    assert_equal 19, execution.context.fetch("pull_request_number")
+    assert_equal [ execution.id ], FakeExecutionJob.enqueued_ids
+  end
+
+  test "does not enqueue the same base and head twice" do
+    first = create_delivery(action: "synchronize")
+    second = create_delivery(action: "ready_for_review")
+
+    perform_job(delivery: first, head_sha: "head-sha")
+    perform_job(delivery: second, head_sha: "head-sha")
+
+    assert_equal 1, PlywoExecution.count
+    assert_equal 1, FakeExecutionJob.enqueued_ids.length
+    assert_equal "completed", second.reload.status
   end
 
   test "authenticates but ignores a pull request edit" do
@@ -31,6 +73,7 @@ class GithubPullRequestWebhookJobTest < ActiveJob::TestCase
 
     assert_equal "ignored", delivery.reload.status
     assert_equal "action_not_execution_trigger", delivery.failure
+    assert_empty FakeExecutionJob.enqueued_ids
   end
 
   test "ignores a stale webhook head" do
@@ -39,6 +82,7 @@ class GithubPullRequestWebhookJobTest < ActiveJob::TestCase
 
     assert_equal "ignored", delivery.reload.status
     assert_equal "stale_head", delivery.failure
+    assert_empty FakeExecutionJob.enqueued_ids
   end
 
   private
@@ -84,7 +128,14 @@ class GithubPullRequestWebhookJobTest < ActiveJob::TestCase
         raise "unexpected repository" unless repository == "plywo/plywo"
         raise "unexpected pull request" unless number == 19
 
-        { "head" => { "sha" => head_sha } }
+        {
+          "base" => { "ref" => "main", "sha" => "base-sha" },
+          "head" => {
+            "ref" => "feature",
+            "sha" => head_sha,
+            "repo" => { "full_name" => "plywo/plywo" }
+          }
+        }
       end
     end
   end
