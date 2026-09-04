@@ -15,6 +15,7 @@ end
 class PlywoSubjectCapture
   DEFAULT_PATH = "/__plywo/demo/behavior".freeze
   DEFAULT_SCENARIO_ID = "dogfood.git.behavior".freeze
+  DEFAULT_START_TIMEOUT_SECONDS = 10.0
   DEFAULT_QUIESCENCE_TIMEOUT_SECONDS = 5.0
   DEFAULT_QUIET_PERIOD_SECONDS = 0.05
 
@@ -98,6 +99,9 @@ class PlywoSubjectCapture
 
     Plywo::Rails::SolidQueueExecution.new(
       execution_id:,
+      start_timeout_seconds: Float(
+        ENV.fetch("PLYWO_SOLID_QUEUE_START_TIMEOUT_SECONDS", DEFAULT_START_TIMEOUT_SECONDS)
+      ),
       quiescence_timeout_seconds: Float(
         ENV.fetch("PLYWO_QUIESCENCE_TIMEOUT_SECONDS", DEFAULT_QUIESCENCE_TIMEOUT_SECONDS)
       ),
