@@ -14,7 +14,7 @@ module Plywo
         "low" => "notice"
       }.freeze
       SIGNAL_LABELS = CommentRenderer::SIGNAL_LABELS
-      ASYNC_REGRESSION_CLASSIFICATIONS = CommentRenderer::ASYNC_REGRESSION_CLASSIFICATIONS
+      ASYNC_DELTA_CLASSIFICATIONS = CommentRenderer::ASYNC_DELTA_CLASSIFICATIONS
 
       def self.call(payload:, run_url: nil)
         new(payload:, run_url:).call
@@ -119,8 +119,35 @@ module Plywo
       end
 
       def async_delta_lines(delta)
-        return [] unless delta && ASYNC_REGRESSION_CLASSIFICATIONS.include?(delta.fetch("classification", "unknown"))
+        return [] unless delta && ASYNC_DELTA_CLASSIFICATIONS.include?(delta.fetch("classification", "unknown"))
 
+        split_async_delta?(delta) ? split_async_delta_lines(delta) : legacy_async_delta_lines(delta)
+      end
+
+      def split_async_delta?(delta)
+        delta.key?("scheduled_delay_delta_ms") && delta.key?("dispatch_wait_delta_ms")
+      end
+
+      def split_async_delta_lines(delta)
+        classification = delta.fetch("classification")
+        prefix = classification == "scheduled_delay_change" ? "Change source" : "Regression source"
+
+        [
+          "",
+          "### Async change attribution",
+          "",
+          "**#{prefix}:** #{async_delta_label(classification)}. " \
+            "Positive async latency growth: **#{format_ms_delta(delta.fetch("positive_async_delta_ms"))}**.",
+          "",
+          "| Stage | Delta | Share of positive async growth |",
+          "| --- | ---: | ---: |",
+          "| Scheduled delay | #{format_ms_delta(delta.fetch("scheduled_delay_delta_ms"))} | #{format_ratio(delta.fetch("scheduled_delay_delta_share_percent"))} |",
+          "| Eligible → worker start | #{format_ms_delta(delta.fetch("dispatch_wait_delta_ms"))} | #{format_ratio(delta.fetch("dispatch_wait_delta_share_percent"))} |",
+          "| Worker runtime | #{format_ms_delta(delta.fetch("worker_wall_delta_ms"))} | #{format_ratio(delta.fetch("worker_runtime_delta_share_percent"))} |"
+        ]
+      end
+
+      def legacy_async_delta_lines(delta)
         enqueue_share = delta.fetch("enqueue_to_start_delta_share_percent")
         worker_share = 100.0 - enqueue_share
 
@@ -140,6 +167,10 @@ module Plywo
 
       def async_delta_label(classification)
         case classification
+        when "scheduled_delay_change"
+          "declared scheduled delay"
+        when "dispatch_wait_regression"
+          "dispatch wait after eligibility"
         when "enqueue_to_start_regression"
           "enqueue-to-start stage"
         when "worker_runtime_regression"
