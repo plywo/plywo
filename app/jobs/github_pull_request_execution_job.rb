@@ -13,6 +13,7 @@ class GithubPullRequestExecutionJob < ApplicationJob
     end
 
     request = Plywo::Executor::Request.from_execution(execution)
+    heartbeat_job_class.schedule(execution.execution_id, execution.attempt_count)
     executor_job_class.perform_later(request.to_h)
 
     Rails.logger.info(
@@ -86,6 +87,10 @@ class GithubPullRequestExecutionJob < ApplicationJob
 
   def executor_job_class
     PlywoExecutorJob
+  end
+
+  def heartbeat_job_class
+    GithubPullRequestExecutionHeartbeatJob
   end
 
   def execution_publisher(token:)
