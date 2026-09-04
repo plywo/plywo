@@ -1,0 +1,78 @@
+require "test_helper"
+
+class PlywoGithubPullRequestExecutionPublisherTest < ActiveSupport::TestCase
+  class TestPublisher < Plywo::Github::PullRequestExecutionPublisher
+    attr_accessor :check_override, :comment_override
+
+    private
+
+    def check_publisher
+      check_override
+    end
+
+    def comment_publisher
+      comment_override
+    end
+  end
+
+  class CheckRecorder
+    attr_reader :calls
+
+    def initialize
+      @calls = []
+    end
+
+    def upsert(**attributes)
+      @calls << attributes
+      :created
+    end
+  end
+
+  class CommentRecorder
+    attr_reader :calls
+
+    def initialize
+      @calls = []
+    end
+
+    def upsert(**attributes)
+      @calls << attributes
+      :created
+    end
+  end
+
+  Execution = Data.define(:context, :candidate_sha, :execution_id)
+
+  test "publishes infrastructure failure as a failed rerunnable check" do
+    check = CheckRecorder.new
+    comment = CommentRecorder.new
+    publisher = TestPublisher.new(token: "installation-token")
+    publisher.check_override = check
+    publisher.comment_override = comment
+
+    result = publisher.infra_failure(
+      execution: execution,
+      error_class: "Errno::ECONNREFUSED"
+    )
+
+    assert_equal({ check: :created, comment: :created }, result)
+    assert_equal "failure", check.calls.one.fetch(:conclusion)
+    assert_equal "github-execution", check.calls.one.fetch(:external_id)
+    assert_match "INFRA_FAILURE", check.calls.one.fetch(:summary)
+    assert_match "not a product regression", check.calls.one.fetch(:summary)
+    assert_match "INFRA_FAILURE", comment.calls.one.fetch(:body)
+  end
+
+  private
+
+  def execution
+    Execution.new(
+      context: {
+        "repository" => "plywo/plywo",
+        "pull_request_number" => 40
+      },
+      candidate_sha: "head-sha",
+      execution_id: "github-execution"
+    )
+  end
+end
