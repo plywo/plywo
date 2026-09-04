@@ -6,7 +6,7 @@ module Demo
       "warmup" => { sql_queries: 0, background_jobs: 0, emails: 0, delay_ms: 0 },
       "baseline" => { sql_queries: 14, background_jobs: 1, emails: 1, delay_ms: 15 },
       "candidate" => { sql_queries: 47, background_jobs: 3, emails: 2, delay_ms: 90 },
-      "git-comparison" => { sql_queries: 14, background_jobs: 1, emails: 1, delay_ms: 15 }
+      "git-comparison" => { sql_queries: 14, background_jobs: 1, emails: 2, delay_ms: 15 }
     }.freeze
 
     def create
@@ -23,7 +23,7 @@ module Demo
       end
 
       profile.fetch(:emails).times do
-        Plywo::Rails::Evidence.side_effect(:email, provider: "demo")
+        DemoMailer.notification(Current.plywo_execution_id).deliver_now
       end
 
       sleep(profile.fetch(:delay_ms) / 1000.0)
