@@ -70,13 +70,18 @@ sql.active_record       -> SQL execution site
 enqueue.active_job      -> background-job enqueue site
 enqueue_at.active_job   -> scheduled-job enqueue site
 deliver.action_mailer   -> synchronous email delivery site
+request.net_http.plywo  -> outbound Net::HTTP request site
 ```
 
-The captured runtime source means "where this observed behavior happened". It is not necessarily the root cause of why a PR changed the behavior. For example, a changed configuration or loop count can create an extra job or email while the runtime source correctly points to the execution or delivery site. Future causal analysis may connect runtime sites to changed-code cause candidates, but GitHub annotations must not claim that inference today.
+`http_requests` now means outbound application network calls, not the inbound Rails action used to invoke a Plywo scenario. `process_action.action_controller` remains useful for detecting action exceptions, but it no longer increments the HTTP side-effect count.
 
-Background-job count changes currently produce a medium-severity `SIDE_EFFECT_CHANGED` finding, so their default merge recommendation is `REVIEW` rather than `BLOCK`. Email count changes currently produce a high-severity `SIDE_EFFECT_CHANGED` finding and therefore default to `BLOCK`. Both can carry a trusted runtime annotation when the application callsite is unambiguous and part of the changed-file set.
+The initial outbound adapter instruments `Net::HTTP#request`. It covers direct stdlib usage and libraries that execute through Net::HTTP. It does not claim universal Ruby HTTP coverage. Other transports such as HTTPX, Excon, or adapters that bypass Net::HTTP should publish equivalent evidence through their own Plywo adapter or through a future OpenTelemetry ingestion path.
 
-Action Mailer attribution currently covers synchronous `deliver_now` behavior. `deliver_later` first crosses an Active Job boundary, so Plywo must propagate execution context into the job before treating the eventual delivery as evidence from the originating execution.
+The captured runtime source means "where this observed behavior happened". It is not necessarily the root cause of why a PR changed the behavior. For example, a changed configuration or loop count can create an extra job or request while the runtime source correctly points to an unchanged `perform_later` or `Net::HTTP` call. Future causal analysis may connect runtime sites to changed-code cause candidates, but GitHub annotations must not claim that inference today.
+
+Background-job count changes currently produce a medium-severity `SIDE_EFFECT_CHANGED` finding, so their default merge recommendation is `REVIEW` rather than `BLOCK`. Generic outbound HTTP count changes are also medium severity today and use `NETWORK_BEHAVIOR_CHANGED`; a trusted runtime request source can produce a warning annotation on the neutral Check. Future method-, host-, and endpoint-aware policy can distinguish a repeated idempotent GET from a repeated payment or webhook POST.
+
+Synchronous email count changes remain high severity and default to `BLOCK`.
 
 This instrumentation is intended for Plywo executions such as CI and test environments, not as an always-on production profiler by default.
 
