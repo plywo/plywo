@@ -32,6 +32,22 @@ class PlywoExecutorCancellationTest < ActiveSupport::TestCase
     assert_empty notification_job.calls
   end
 
+  test "keeps durable cancellation when notification enqueue fails" do
+    execution = running_execution
+    notification_job = Object.new
+    notification_job.define_singleton_method(:perform_later) do |*|
+      raise RuntimeError, "queue unavailable"
+    end
+
+    assert Plywo::Executor::Cancellation.new(notification_job:).call(execution:, reason: "user_cancelled")
+
+    execution.reload
+    assert_equal "cancelled", execution.status
+    assert_equal "cancelled", execution.outcome
+    assert_equal "user_cancelled", execution.cancellation_reason
+    assert_nil execution.failure
+  end
+
   private
 
   def running_execution
