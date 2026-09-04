@@ -13,29 +13,13 @@ class GithubPullRequestExecutionJob < ApplicationJob
     end
 
     request = Plywo::Executor::Request.from_execution(execution)
-    payload = executor.call(request:)
+    executor_job_class.perform_later(request.to_h)
 
-    publish_token = installation_token(execution:)
-    pull_request = current_pull_request(execution:, token: publish_token.value)
-    if (reason = stale_reason(execution:, pull_request:))
-      ignore_stale!(execution:, reason: "#{reason}_before_publish")
-      return
-    end
-
-    publication = execution_publisher(token: publish_token.value).call(execution:, payload:)
-    if publication.fetch(:comment) == :stale
-      execution.ignore!("stale_during_publish")
-      return
-    end
-
-    execution.complete!(payload)
     Rails.logger.info(
-      "Plywo GitHub execution completed execution_id=#{execution.execution_id.inspect} " \
+      "Plywo GitHub execution dispatched execution_id=#{execution.execution_id.inspect} " \
       "repository=#{execution.context.fetch("repository").inspect} " \
       "pr=#{execution.context.fetch("pull_request_number").inspect} " \
-      "decision=#{execution.decision.inspect} outcome=#{execution.outcome.inspect} " \
-      "attempt=#{execution.attempt_count.inspect} check=#{publication.fetch(:check).inspect} " \
-      "comment=#{publication.fetch(:comment).inspect}"
+      "attempt=#{execution.attempt_count.inspect}"
     )
   rescue StandardError => error
     if execution
@@ -100,8 +84,8 @@ class GithubPullRequestExecutionJob < ApplicationJob
     Plywo::Github::PullRequestClient.new(token:)
   end
 
-  def executor
-    Plywo::Executor::Resolver.from_env(root: Rails.root)
+  def executor_job_class
+    PlywoExecutorJob
   end
 
   def execution_publisher(token:)
