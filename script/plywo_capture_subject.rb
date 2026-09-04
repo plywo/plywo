@@ -28,6 +28,14 @@ class PlywoSubjectCapture
 
     raise "Expected the application request to enqueue at least one correlated job" if application_job_executions.empty?
 
+    async_correlation_confirmed = application_job_executions.all? do |job|
+      job.fetch("execution_id") == execution_id &&
+        job.fetch("run_id") == run_id &&
+        job.fetch("subject") == subject &&
+        job.fetch("source") == "application_enqueue"
+    end
+    raise "Application-enqueued job lost Plywo execution context" unless async_correlation_confirmed
+
     payload = {
       "id" => label,
       "execution_id" => execution_id,
@@ -39,6 +47,7 @@ class PlywoSubjectCapture
       "status" => passed ? "passed" : "failed",
       "http_status" => response.status,
       "correlation_confirmed" => response["X-Plywo-Execution-Id"] == execution_id,
+      "async_correlation_confirmed" => async_correlation_confirmed,
       "measurements" => measurements,
       "attributions" => collector.respond_to?(:attributions) ? collector.attributions : {},
       "durable_observations" => durable_observations(execution_id:),
