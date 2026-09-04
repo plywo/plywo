@@ -3,7 +3,7 @@ module Plywo
     class Resolver
       Error = Class.new(StandardError)
 
-      def self.from_env(root: Rails.root, env: ENV, rails_env: Rails.env)
+      def self.from_env(root: ::Rails.root, env: ENV, rails_env: ::Rails.env)
         mode = env["PLYWO_EXECUTOR"] || env["PLYWO_GITHUB_EXECUTION_MODE"]
         mode ||= rails_env.development? ? "local" : "disabled"
 
