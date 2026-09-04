@@ -143,6 +143,7 @@ module Plywo
           "SOLID_QUEUE_DATABASE_URL" => queue_url,
           "PLYWO_SOLID_QUEUE" => "1",
           "PLYWO_ASYNC_TRANSPORT" => "solid_queue",
+          "PLYWO_SOLID_QUEUE_DIAGNOSTICS" => "1",
           "PLYWO_SOLID_QUEUE_START_TIMEOUT_SECONDS" => "30",
           "PLYWO_QUIESCENCE_TIMEOUT_SECONDS" => "30",
           "SOLID_QUEUE_SKIP_RECURRING" => "true"
