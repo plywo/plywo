@@ -1,3 +1,6 @@
 development: {}
 test: {}
-production: {}
+production:
+  reap_expired_plywo_executions:
+    class: GithubPullRequestExecutionLeaseReaperJob
+    schedule: every minute
