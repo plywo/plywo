@@ -43,6 +43,8 @@ finding.source
 GitHub annotation
 ```
 
+`Plywo::Rails::Evidence.attribute_next_line` is a low-level convenience marker. Keep the call on one physical line and place it immediately above the causal line that should receive the annotation. For integrations that already know the exact location, prefer `Plywo::Rails::Evidence.attribute(..., line:)`.
+
 ## Agent contract
 
 Agents should never be required to parse the PR comment, Check Run, or annotations. Publish a versioned result JSON and later expose the same model through API/MCP.
