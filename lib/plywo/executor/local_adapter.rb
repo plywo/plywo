@@ -5,7 +5,7 @@ module Plywo
         @runner = runner || Plywo::Github::LocalPullRequestRunner.new(root:)
       end
 
-      def call(request:)
+      def call(request:, repository_capability: nil)
         Result.success(@runner.call(execution: request))
       rescue StandardError => error
         Result.failure(error)
