@@ -11,7 +11,9 @@ module Plywo
         def initialize(snapshot)
           @snapshot = snapshot
           pending = snapshot.fetch("work_items").select { |item| item.fetch("active") }
-          summary = pending.map { |item| "#{item.fetch("name") || item.fetch("kind")}:#{item.fetch("work_id")}" }.join(", ")
+          summary = pending.map do |item|
+            "#{item.fetch("name") || item.fetch("kind")}:#{item.fetch("work_id")}"
+          end.join(", ")
           super("Execution #{snapshot.fetch("execution_id")} did not become quiescent; pending: #{summary}")
         end
       end
@@ -64,7 +66,7 @@ module Plywo
             quiet_started_at = nil
           end
 
-          raise TimeoutError, current_snapshot if now >= deadline
+          raise TimeoutError.new(current_snapshot) if now >= deadline
 
           sleep([ poll_interval_seconds, deadline - now ].min)
         end
