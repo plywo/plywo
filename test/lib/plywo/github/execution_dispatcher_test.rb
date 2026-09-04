@@ -20,7 +20,7 @@ class PlywoGithubExecutionDispatcherTest < ActiveSupport::TestCase
     delivery = create_delivery
     dispatcher = Plywo::Github::ExecutionDispatcher.new(scenario_id: "scenario")
     execution, = dispatcher.call(delivery:, pull_request: pull_request_payload)
-    execution.update!(status: "completed", decision: "allow", finished_at: Time.current)
+    execution.update!(status: "completed", decision: "allow", outcome: "allow", finished_at: Time.current)
 
     existing, enqueue = dispatcher.call(delivery:, pull_request: pull_request_payload)
 
@@ -29,19 +29,34 @@ class PlywoGithubExecutionDispatcherTest < ActiveSupport::TestCase
     assert_equal "completed", existing.status
   end
 
-  test "requeues a failed execution for the same identity" do
+  test "requeues an infra failure for the same identity" do
     delivery = create_delivery
     dispatcher = Plywo::Github::ExecutionDispatcher.new(scenario_id: "scenario")
     execution, = dispatcher.call(delivery:, pull_request: pull_request_payload)
-    execution.update!(status: "failed", failure: "boom", finished_at: Time.current)
+    execution.claim!
+    execution.fail!(RuntimeError.new("boom"))
 
     retried, enqueue = dispatcher.call(delivery:, pull_request: pull_request_payload)
 
     assert enqueue
     assert_equal execution.id, retried.id
     assert_equal "queued", retried.status
+    assert_nil retried.outcome
     assert_nil retried.failure
     assert_nil retried.finished_at
+  end
+
+  test "does not requeue a failed execution without an infra failure outcome" do
+    delivery = create_delivery
+    dispatcher = Plywo::Github::ExecutionDispatcher.new(scenario_id: "scenario")
+    execution, = dispatcher.call(delivery:, pull_request: pull_request_payload)
+    execution.update!(status: "failed", failure: "manual stop", finished_at: Time.current)
+
+    existing, enqueue = dispatcher.call(delivery:, pull_request: pull_request_payload)
+
+    refute enqueue
+    assert_equal execution.id, existing.id
+    assert_equal "failed", existing.status
   end
 
   private
