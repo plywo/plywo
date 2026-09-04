@@ -61,7 +61,7 @@ module Plywo
 
           This is an execution infrastructure failure, **not a product regression**. It is safe to re-run the check after the infrastructure issue is resolved.
 
-          Execution: `#{execution.execution_id}`  
+          Execution: `#{execution.execution_id}`<br>
           Failure class: `#{error.class}`
         MARKDOWN
 
@@ -86,8 +86,8 @@ module Plywo
 
           The check can be re-run after the execution infrastructure is healthy.
 
-          Run: `#{execution.execution_id}`  
-          Candidate: `#{execution.candidate_sha.first(8)}`  
+          Run: `#{execution.execution_id}`<br>
+          Candidate: `#{execution.candidate_sha.first(8)}`<br>
           Failure class: `#{error.class}`
         MARKDOWN
 
