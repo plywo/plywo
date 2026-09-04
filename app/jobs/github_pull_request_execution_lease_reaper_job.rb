@@ -1,5 +1,5 @@
 class GithubPullRequestExecutionLeaseReaperJob < ApplicationJob
-  queue_as :default
+  queue_as :control
 
   def perform(now = Time.current)
     PlywoExecution
