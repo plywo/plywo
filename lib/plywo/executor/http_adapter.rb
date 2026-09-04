@@ -9,7 +9,7 @@ module Plywo
       Response = Data.define(:status, :body)
 
       DEFAULT_OPEN_TIMEOUT_SECONDS = 5
-      DEFAULT_READ_TIMEOUT_SECONDS = 35.minutes.to_i
+      DEFAULT_READ_TIMEOUT_SECONDS = 2_100
 
       class NetHttpTransport
         def call(uri:, headers:, body:, open_timeout:, read_timeout:)
@@ -71,7 +71,7 @@ module Plywo
 
       def validate_configuration!
         raise Error, "Remote executor URL must use http or https" unless %w[http https].include?(@uri.scheme)
-        raise Error, "Remote executor URL must include a host" if @uri.host.blank?
+        raise Error, "Remote executor URL must include a host" if @uri.host.to_s.empty?
         raise Error, "Remote executor token is required" if @token.empty?
         raise Error, "Remote executor open timeout must be positive" unless @open_timeout.positive?
         raise Error, "Remote executor read timeout must be positive" unless @read_timeout.positive?
