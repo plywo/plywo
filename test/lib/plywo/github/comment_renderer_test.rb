@@ -45,10 +45,10 @@ class PlywoGithubCommentRendererTest < ActiveSupport::TestCase
     assert_includes markdown, "Evidence: exact Git worktrees + isolated PostgreSQL databases"
   end
 
-  test "explains which async stage caused a regression" do
+  test "explains which async stage caused a regression for legacy evidence" do
     markdown = Plywo::Github::CommentRenderer.markdown(payload: async_regression_payload)
 
-    assert_includes markdown, "Enqueue → worker start (max job)"
+    assert_includes markdown, "Enqueue → worker start (aggregate)"
     assert_includes markdown, "enqueue-to-start dominates"
     assert_includes markdown, "Async change attribution"
     assert_includes markdown, "Regression source: enqueue-to-start stage"

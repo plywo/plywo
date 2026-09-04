@@ -117,8 +117,15 @@ begin
 
   evidence = PlywoEvidenceEvent.where(execution_id:, producer_id: job_id).order(:id)
   signals = evidence.map(&:signal)
-  %w[sql_queries emails http_requests].each do |signal|
+  %w[queue_wait_ms scheduled_delay_ms dispatch_wait_ms sql_queries emails http_requests].each do |signal|
     raise "Solid Queue worker did not persist #{signal} evidence" unless signals.include?(signal)
+  end
+
+  queue_stage_values = evidence.where(signal: %w[queue_wait_ms scheduled_delay_ms dispatch_wait_ms]).each_with_object({}) do |record, values|
+    values[record.signal] = record.payload.fetch("value")
+  end
+  unless (queue_stage_values.fetch("queue_wait_ms") - queue_stage_values.fetch("scheduled_delay_ms") - queue_stage_values.fetch("dispatch_wait_ms")).abs <= 0.1
+    raise "Solid Queue stage decomposition does not add up"
   end
 
   queue_job.reload
@@ -135,6 +142,7 @@ begin
     "pre_worker_status" => "enqueued",
     "final_work_status" => completed_work.status,
     "evidence_signals" => signals,
+    "queue_stages" => queue_stage_values,
     "quiescence" => quiescence,
     "request_current_after_worker" => {
       "execution_id" => Current.plywo_execution_id,

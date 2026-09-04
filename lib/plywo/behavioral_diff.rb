@@ -26,6 +26,14 @@ module Plywo
         severity: "medium",
         optional: true
       },
+      "scheduled_delay_ms" => { decision: false, optional: true },
+      "dispatch_wait_ms" => {
+        reason_code: "DISPATCH_WAIT_REGRESSION",
+        threshold_percent: 20.0,
+        threshold_absolute: 20.0,
+        severity: "medium",
+        optional: true
+      },
       "worker_wall_ms" => {
         reason_code: "WORKER_LATENCY_REGRESSION",
         threshold_percent: 20.0,
@@ -71,7 +79,7 @@ module Plywo
         candidate_value = numeric(@candidate.fetch(signal, 0))
         delta = candidate_value - baseline_value
         delta_percent = percent_change(baseline_value, candidate_value)
-        decision_relevant = policy.fetch(:decision, true)
+        decision_relevant = decision_relevant?(signal, policy)
         regression = decision_relevant && regression?(baseline_value, candidate_value, policy)
 
         signals[signal] = {
@@ -121,6 +129,16 @@ module Plywo
       return true unless policy.fetch(:optional, false)
 
       @baseline.key?(signal) && @candidate.key?(signal)
+    end
+
+    def decision_relevant?(signal, policy)
+      return false if signal == "queue_wait_ms" && split_queue_stage_available?
+
+      policy.fetch(:decision, true)
+    end
+
+    def split_queue_stage_available?
+      @baseline.key?("dispatch_wait_ms") && @candidate.key?("dispatch_wait_ms")
     end
 
     def unavailable_signal(signal, policy)
@@ -181,6 +199,8 @@ module Plywo
         ),
         "async_delta" => AsyncDeltaDiagnosis.call(
           queue_wait: signals.fetch("queue_wait_ms"),
+          scheduled_delay: signals.fetch("scheduled_delay_ms"),
+          dispatch_wait: signals.fetch("dispatch_wait_ms"),
           worker_wall: signals.fetch("worker_wall_ms")
         ),
         "worker" => runtime_scope_diagnosis(

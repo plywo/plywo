@@ -3,6 +3,11 @@ module Plywo
     module ActiveJobExecutionContext
       CONTEXT_KEY = "plywo_execution_context"
       CONTEXT_ATTRIBUTES = %w[plywo_execution_id plywo_run_id plywo_subject].freeze
+      QUEUE_STAGE_SEMANTICS = {
+        "queue_wait_ms" => "enqueue_to_start",
+        "scheduled_delay_ms" => "enqueue_to_eligibility",
+        "dispatch_wait_ms" => "eligibility_to_start"
+      }.freeze
 
       def self.included(base)
         base.before_enqueue do |job|
@@ -59,7 +64,7 @@ module Plywo
         return yield if execution_id.nil?
 
         work_item = ExecutionWorkLifecycle.running(self)
-        record_plywo_queue_wait(work_item)
+        record_plywo_queue_stages(work_item)
         result = DurableEvidenceBuffer.capture(
           execution_id:,
           producer_kind: "active_job",
@@ -73,19 +78,26 @@ module Plywo
         raise
       end
 
-      def record_plywo_queue_wait(work_item)
-        return unless work_item&.enqueued_at && work_item.started_at
-
-        queue_wait_ms = ((work_item.started_at - work_item.enqueued_at) * 1000).round(1)
-        DurableEvidenceBuffer.record_runtime_metric(
-          execution_id: Current.plywo_execution_id,
-          signal: "queue_wait_ms",
-          value: queue_wait_ms,
-          producer_kind: "active_job",
-          producer_name: self.class.name,
-          producer_id: job_id,
-          attributes: { semantics: "enqueue_to_start" }
+      def record_plywo_queue_stages(work_item)
+        timing = QueueStageTiming.call(
+          enqueued_at: work_item&.enqueued_at,
+          started_at: work_item&.started_at,
+          scheduled_at:
         )
+
+        timing.each do |signal, value|
+          next if value.nil?
+
+          DurableEvidenceBuffer.record_runtime_metric(
+            execution_id: Current.plywo_execution_id,
+            signal:,
+            value:,
+            producer_kind: "active_job",
+            producer_name: self.class.name,
+            producer_id: job_id,
+            attributes: { semantics: QUEUE_STAGE_SEMANTICS.fetch(signal) }
+          )
+        end
       end
     end
   end

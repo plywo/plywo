@@ -34,7 +34,14 @@ raise "Plywo execution context leaked after origin lifecycle" if Current.plywo_e
 ActiveJob::Base.deserialize(serialized_job).perform_now
 
 records = PlywoEvidenceEvent.where(execution_id:).order(:id).to_a
-runtime_signals = %w[queue_wait_ms worker_wall_ms worker_process_cpu_ms worker_thread_cpu_ms]
+runtime_signals = %w[
+  queue_wait_ms
+  scheduled_delay_ms
+  dispatch_wait_ms
+  worker_wall_ms
+  worker_process_cpu_ms
+  worker_thread_cpu_ms
+]
 product_records = records.reject { |record| runtime_signals.include?(record.signal) }
 runtime_records = records.select { |record| runtime_signals.include?(record.signal) }
 expected_product_signals = %w[sql_queries emails http_requests]
@@ -49,7 +56,19 @@ raise "Expected propagated run id" unless records.all? { |record| record.run_id 
 raise "Expected propagated subject" unless records.all? { |record| record.subject == "durable-worker-proof" }
 raise "Expected application source attribution" unless product_records.all? { |record| record.path == "script/plywo_durable_worker_evidence.rb" }
 raise "Expected numeric worker runtime values" unless runtime_records.all? { |record| record.payload.fetch("value").is_a?(Numeric) }
-raise "Expected enqueue-to-start semantics" unless runtime_records.first.payload.fetch("semantics") == "enqueue_to_start"
+
+queue_records = runtime_records.first(3)
+expected_semantics = %w[enqueue_to_start enqueue_to_eligibility eligibility_to_start]
+unless queue_records.map { |record| record.payload.fetch("semantics") } == expected_semantics
+  raise "Expected queue stage semantics #{expected_semantics.inspect}"
+end
+
+queue_wait = queue_records[0].payload.fetch("value")
+scheduled_delay = queue_records[1].payload.fetch("value")
+dispatch_wait = queue_records[2].payload.fetch("value")
+unless (queue_wait - scheduled_delay - dispatch_wait).abs <= 0.1
+  raise "Queue stage decomposition does not add up"
+end
 
 payload = {
   execution_id:,
@@ -64,6 +83,7 @@ payload = {
       line: record.start_line,
       confidence: record.confidence,
       value: record.payload["value"],
+      semantics: record.payload["semantics"],
       producer_kind: record.producer_kind,
       producer_name: record.producer_name,
       producer_id: record.producer_id

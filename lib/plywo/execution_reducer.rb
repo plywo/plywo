@@ -5,7 +5,7 @@ module Plywo
   class ExecutionReducer
     COUNTABLE_SIGNALS = %w[sql_queries background_jobs emails http_requests errors].freeze
     SUMMABLE_RUNTIME_SIGNALS = %w[worker_wall_ms worker_process_cpu_ms worker_thread_cpu_ms].freeze
-    MAX_RUNTIME_SIGNALS = %w[queue_wait_ms].freeze
+    MAX_RUNTIME_SIGNALS = %w[queue_wait_ms scheduled_delay_ms dispatch_wait_ms].freeze
 
     def self.call(execution:)
       new(execution:).call
