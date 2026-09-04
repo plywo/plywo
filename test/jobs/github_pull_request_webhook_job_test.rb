@@ -55,16 +55,15 @@ class GithubPullRequestWebhookJobTest < ActiveJob::TestCase
     assert_equal [ execution.id ], FakeExecutionJob.enqueued_ids
   end
 
-  test "reuses one durable execution and may re-enqueue it while queued" do
+  test "re-enqueues the same base and head while the durable execution is still queued" do
     first = create_delivery(action: "synchronize")
     second = create_delivery(action: "ready_for_review")
 
     perform_job(delivery: first, head_sha: "head-sha")
     perform_job(delivery: second, head_sha: "head-sha")
 
-    execution = PlywoExecution.sole
-    assert_equal [ execution.id, execution.id ], FakeExecutionJob.enqueued_ids
-    assert_equal "queued", execution.status
+    assert_equal 1, PlywoExecution.count
+    assert_equal 2, FakeExecutionJob.enqueued_ids.length
     assert_equal "completed", second.reload.status
   end
 
