@@ -12,7 +12,8 @@ class GithubPullRequestExecutionJob < ApplicationJob
       return
     end
 
-    payload = execution_runner.call(execution:)
+    request = Plywo::Executor::Request.from_execution(execution)
+    payload = executor.call(request:)
 
     publish_token = installation_token(execution:)
     pull_request = current_pull_request(execution:, token: publish_token.value)
@@ -99,11 +100,8 @@ class GithubPullRequestExecutionJob < ApplicationJob
     Plywo::Github::PullRequestClient.new(token:)
   end
 
-  def execution_runner
-    mode = ENV.fetch("PLYWO_GITHUB_EXECUTION_MODE", Rails.env.development? ? "local" : "disabled")
-    return Plywo::Github::LocalPullRequestRunner.new(root: Rails.root) if mode == "local"
-
-    raise "Unsupported PLYWO_GITHUB_EXECUTION_MODE=#{mode.inspect}"
+  def executor
+    Plywo::Executor::Resolver.from_env(root: Rails.root)
   end
 
   def execution_publisher(token:)
