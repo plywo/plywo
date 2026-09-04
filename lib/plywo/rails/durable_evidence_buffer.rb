@@ -49,6 +49,28 @@ module Plywo
           persist(events) if events&.any?
         end
 
+        def record_runtime_metric(execution_id:, signal:, value:, producer_kind:, producer_name:, producer_id:, attributes: {})
+          now = Time.current
+          persist([
+            event_row(
+              execution_id:,
+              run_id: Current.plywo_run_id,
+              subject: Current.plywo_subject,
+              signal:,
+              path: nil,
+              start_line: nil,
+              end_line: nil,
+              confidence: "runtime",
+              payload: { "value" => value }.merge(attributes.transform_keys(&:to_s)),
+              producer_kind:,
+              producer_name:,
+              producer_id:,
+              occurred_at: now,
+              now:
+            )
+          ])
+        end
+
         def persisting?
           InternalOperation.active?
         end
