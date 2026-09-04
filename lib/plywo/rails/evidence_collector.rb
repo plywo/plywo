@@ -18,8 +18,9 @@ module Plywo
       def capture
         subscribers = subscribe
         started_at = monotonic_time
+        internal_started_at = InternalOperation.elapsed_seconds
         yield
-        @measurements.merge("duration_ms" => elapsed_ms(started_at))
+        @measurements.merge("duration_ms" => elapsed_ms(started_at, internal_started_at))
       rescue StandardError
         @measurements["errors"] += 1 if @measurements["errors"].zero?
         raise
@@ -87,8 +88,11 @@ module Plywo
         Process.clock_gettime(Process::CLOCK_MONOTONIC)
       end
 
-      def elapsed_ms(started_at)
-        ((monotonic_time - started_at) * 1000).round(1)
+      def elapsed_ms(started_at, internal_started_at)
+        wall_elapsed = monotonic_time - started_at
+        internal_elapsed = InternalOperation.elapsed_seconds - internal_started_at
+        product_elapsed = [wall_elapsed - internal_elapsed, 0.0].max
+        (product_elapsed * 1000).round(1)
       end
     end
   end
