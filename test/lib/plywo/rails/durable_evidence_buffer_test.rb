@@ -16,7 +16,7 @@ class PlywoFailingEvidenceJob < ApplicationJob
 end
 
 class PlywoRailsDurableEvidenceBufferTest < ActiveSupport::TestCase
-  RUNTIME_SIGNALS = %w[worker_wall_ms worker_process_cpu_ms worker_thread_cpu_ms].freeze
+  RUNTIME_SIGNALS = %w[queue_wait_ms worker_wall_ms worker_process_cpu_ms worker_thread_cpu_ms].freeze
 
   setup do
     Current.reset
@@ -67,6 +67,7 @@ class PlywoRailsDurableEvidenceBufferTest < ActiveSupport::TestCase
     assert product_records.all? { |record| record.confidence == "runtime" }
     assert runtime_records.all? { |record| record.payload.fetch("value") >= 0.0 }
     assert runtime_records.all? { |record| record.confidence == "runtime" }
+    assert_equal "enqueue_to_start", runtime_records.first.payload.fetch("semantics")
 
     work_item = PlywoExecutionWorkItem.find_by!(execution_id:, work_id: job.job_id)
     assert_equal "completed", work_item.status
