@@ -10,9 +10,29 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_04_103500) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_04_173000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "github_webhook_deliveries", force: :cascade do |t|
+    t.string "action"
+    t.string "base_sha"
+    t.datetime "created_at", null: false
+    t.string "delivery_id", null: false
+    t.string "event", null: false
+    t.text "failure"
+    t.datetime "finished_at"
+    t.string "head_sha"
+    t.bigint "installation_id"
+    t.integer "pull_request_number"
+    t.string "repository"
+    t.datetime "started_at"
+    t.string "status", default: "accepted", null: false
+    t.datetime "updated_at", null: false
+    t.index ["delivery_id"], name: "index_github_webhook_deliveries_on_delivery_id", unique: true
+    t.index ["repository", "pull_request_number"], name: "index_github_webhook_deliveries_on_repository_and_pull_request_number"
+    t.index ["status"], name: "index_github_webhook_deliveries_on_status"
+  end
 
   create_table "plywo_evidence_events", force: :cascade do |t|
     t.string "confidence"
