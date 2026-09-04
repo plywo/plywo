@@ -112,14 +112,14 @@ module Plywo
 
       def prepare_database!(root:, primary_url:, queue_url:)
         run!(
-          env: subject_environment(primary_url:, queue_url:),
+          env: subject_environment(root:, primary_url:, queue_url:),
           command: [ root.join("bin", "rails").to_s, "db:prepare" ],
           chdir: root
         )
       end
 
       def capture_subject!(execution:, root:, label:, sha:, primary_url:, queue_url:, output:)
-        env = subject_environment(primary_url:, queue_url:).merge(
+        env = subject_environment(root:, primary_url:, queue_url:).merge(
           "PLYWO_RUN_ID" => execution.execution_id,
           "PLYWO_SCENARIO_ID" => execution.scenario_id,
           "PLYWO_SUBJECT" => "github-pull-request",
@@ -135,13 +135,16 @@ module Plywo
         )
       end
 
-      def subject_environment(primary_url:, queue_url:)
+      def subject_environment(root:, primary_url:, queue_url:)
         {
+          "BUNDLE_GEMFILE" => root.join("Gemfile").to_s,
           "RAILS_ENV" => "test",
           "DATABASE_URL" => primary_url,
           "SOLID_QUEUE_DATABASE_URL" => queue_url,
           "PLYWO_SOLID_QUEUE" => "1",
           "PLYWO_ASYNC_TRANSPORT" => "solid_queue",
+          "PLYWO_SOLID_QUEUE_START_TIMEOUT_SECONDS" => "30",
+          "PLYWO_QUIESCENCE_TIMEOUT_SECONDS" => "30",
           "SOLID_QUEUE_SKIP_RECURRING" => "true"
         }
       end
