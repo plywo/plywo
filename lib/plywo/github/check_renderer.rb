@@ -9,12 +9,13 @@ module Plywo
       }.freeze
       SIGNAL_LABELS = CommentRenderer::SIGNAL_LABELS
 
-      def self.call(payload:)
-        new(payload:).call
+      def self.call(payload:, run_url: nil)
+        new(payload:, run_url:).call
       end
 
-      def initialize(payload:)
+      def initialize(payload:, run_url: nil)
         @payload = payload
+        @run_url = run_url
       end
 
       def call
@@ -48,7 +49,9 @@ module Plywo
       end
 
       def summary
-        lines = [ decision_line, "", "| Signal | Baseline | Candidate | Change |", "| --- | ---: | ---: | ---: |" ]
+        lines = [ decision_line ]
+        lines << "[Open execution](#{@run_url})" if @run_url
+        lines.concat([ "", "| Signal | Baseline | Candidate | Change |", "| --- | ---: | ---: | ---: |" ])
 
         result.fetch("signals").each do |signal, values|
           marker = values.fetch("regression") ? " ⚠️" : ""

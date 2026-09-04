@@ -22,7 +22,7 @@ review -> neutral
 block  -> failure
 ```
 
-The check uses the Plywo `run_id` as `external_id` and links `details_url` to the full execution. A rerun on the same head updates the existing Plywo check instead of creating a duplicate.
+The check uses the Plywo `run_id` as `external_id`. GitHub Actions may assign its own Check Run page as `details_url`, so the output summary also carries an explicit link to the Actions execution. GitHub presents the latest `Plywo / Behavioral Diff` context for the current head; internal Check Run IDs may differ across workflow attempts.
 
 ## Annotations
 

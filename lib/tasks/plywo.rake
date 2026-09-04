@@ -72,7 +72,7 @@ namespace :plywo do
   desc "Publish the Plywo behavioral decision as a GitHub Check Run"
   task github_check: :environment do
     payload = JSON.parse(File.read(ENV.fetch("PLYWO_INPUT")))
-    rendered = Plywo::Github::CheckRenderer.call(payload:)
+    rendered = Plywo::Github::CheckRenderer.call(payload:, run_url: ENV["PLYWO_RUN_URL"])
 
     puts "#{rendered.fetch("name")}: #{rendered.fetch("conclusion")} - #{rendered.fetch("title")}"
     puts rendered.fetch("summary")

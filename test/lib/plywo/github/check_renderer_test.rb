@@ -2,12 +2,16 @@ require "test_helper"
 
 class PlywoGithubCheckRendererTest < ActiveSupport::TestCase
   test "maps an allowed result to a successful GitHub check" do
-    rendered = Plywo::Github::CheckRenderer.call(payload: pair_payload(sql_queries: 14))
+    rendered = Plywo::Github::CheckRenderer.call(
+      payload: pair_payload(sql_queries: 14),
+      run_url: "https://github.com/plywo/plywo/actions/runs/1"
+    )
 
     assert_equal "Plywo / Behavioral Diff", rendered.fetch("name")
     assert_equal "success", rendered.fetch("conclusion")
     assert_equal "No behavioral regression detected", rendered.fetch("title")
     assert_includes rendered.fetch("summary"), "**ALLOW**"
+    assert_includes rendered.fetch("summary"), "[Open execution](https://github.com/plywo/plywo/actions/runs/1)"
   end
 
   test "maps a blocking regression to a failed GitHub check" do
