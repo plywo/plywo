@@ -14,7 +14,7 @@ class PlywoExecutionTest < ActiveSupport::TestCase
     refute execution.claim!(now: now + 1, lease_seconds: 120)
   end
 
-  test "renews only a live running lease" do
+  test "renews only a live leased execution" do
     execution = create_execution
     now = Time.utc(2026, 9, 4, 20, 0, 0)
     execution.claim!(now:, lease_seconds: 120)
@@ -61,6 +61,20 @@ class PlywoExecutionTest < ActiveSupport::TestCase
     assert_nil execution.failure
     refute execution.rerunnable?
     refute execution.cancel!(attempt_number: 1, reason: "again", now: now + 11)
+  end
+
+  test "finalization creates a point of no return that cancellation cannot overwrite" do
+    execution = create_execution
+    now = Time.utc(2026, 9, 5, 0, 45, 0)
+    execution.claim!(now:, lease_seconds: 120)
+
+    refute execution.begin_finalization!(attempt_number: 2, now: now + 10)
+    assert execution.begin_finalization!(attempt_number: 1, now: now + 10)
+    assert_equal "finalizing", execution.status
+    refute execution.cancel!(attempt_number: 1, reason: "too_late", now: now + 11)
+
+    assert execution.renew_lease!(now: now + 20, lease_seconds: 120)
+    assert_equal "finalizing", execution.status
   end
 
   test "stores the behavioral outcome on completion and closes the lease" do
