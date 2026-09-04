@@ -60,7 +60,10 @@ module Plywo
           raise Error, "Remote executor returned HTTP #{response.status}"
         end
 
-        Result.from_h(JSON.parse(response.body))
+        payload = JSON.parse(response.body)
+        raise Error, "Remote executor result must be a JSON object" unless payload.is_a?(Hash)
+
+        Result.from_h(payload)
       rescue JSON::ParserError => error
         raise Error, "Remote executor returned invalid JSON: #{error.message}"
       rescue KeyError, ArgumentError => error
