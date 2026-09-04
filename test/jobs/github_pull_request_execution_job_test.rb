@@ -2,7 +2,7 @@ require "test_helper"
 
 class GithubPullRequestExecutionJobTest < ActiveJob::TestCase
   class TestJob < GithubPullRequestExecutionJob
-    attr_accessor :authentication_override, :client_override, :executor_override, :publisher_override
+    attr_accessor :authentication_override, :client_override, :executor_job_override, :publisher_override
 
     private
 
@@ -16,8 +16,8 @@ class GithubPullRequestExecutionJobTest < ActiveJob::TestCase
       client_override
     end
 
-    def executor
-      executor_override
+    def executor_job_class
+      executor_job_override
     end
 
     def execution_publisher(token:)
@@ -27,91 +27,77 @@ class GithubPullRequestExecutionJobTest < ActiveJob::TestCase
     end
   end
 
-  test "runs, publishes, and completes a current execution through a portable request" do
+  test "claims a current execution and dispatches a serialized portable request" do
     execution = create_execution
-    client = sequence_client([ current_pull_request, current_pull_request ])
-    executor = counting_executor(payload)
-    publisher = counting_publisher(check: :created, comment: :created)
+    dispatcher = counting_executor_job
+    publisher = counting_publisher
 
-    perform_job(execution:, client:, executor:, publisher:)
+    perform_job(
+      execution:,
+      client: sequence_client([ current_pull_request ]),
+      dispatcher:,
+      publisher:
+    )
 
     execution.reload
-    request = executor.requests.first
-    assert_equal "completed", execution.status
-    assert_equal "allow", execution.decision
-    assert_equal "allow", execution.outcome
+    request = Plywo::Executor::Request.from_h(dispatcher.payloads.first)
+    assert_equal "running", execution.status
     assert_equal 1, execution.attempt_count
-    assert_equal payload, execution.result
-    assert_equal 1, executor.calls
-    assert_equal 1, executor.requests.length
+    assert_equal 1, dispatcher.payloads.length
     assert_equal execution.execution_id, request.execution_id
     assert_equal 1, request.attempt_number
     refute_includes request.context, "installation_id"
-    assert_equal 1, publisher.calls
+    refute_includes request.context, "delivery_id"
+    assert_equal 0, publisher.infra_calls
   end
 
-  test "classifies an executor error as infra failure and publishes that outcome" do
+  test "ignores a stale head before executor dispatch" do
     execution = create_execution
-    client = sequence_client([ current_pull_request, current_pull_request ])
-    executor = failing_executor(RuntimeError.new("worker unavailable"))
-    publisher = counting_publisher(check: :created, comment: :created)
+    stale = current_pull_request.deep_dup
+    stale["head"]["sha"] = "newer-head"
+    dispatcher = counting_executor_job
+
+    perform_job(
+      execution:,
+      client: sequence_client([ stale ]),
+      dispatcher:,
+      publisher: counting_publisher
+    )
+
+    assert_equal "ignored", execution.reload.status
+    assert_equal "stale", execution.outcome
+    assert_equal "stale_head", execution.failure
+    assert_empty dispatcher.payloads
+  end
+
+  test "classifies dispatch failure as infrastructure failure" do
+    execution = create_execution
+    publisher = counting_publisher
 
     assert_raises(RuntimeError) do
-      perform_job(execution:, client:, executor:, publisher:)
+      perform_job(
+        execution:,
+        client: sequence_client([ current_pull_request, current_pull_request ]),
+        dispatcher: failing_executor_job(RuntimeError.new("queue unavailable")),
+        publisher:
+      )
     end
 
     execution.reload
     assert_equal "failed", execution.status
     assert_equal "infra_failure", execution.outcome
     assert_equal 1, execution.attempt_count
-    assert execution.rerunnable?
+    assert_match(/queue unavailable/, execution.failure)
     assert_equal 1, publisher.infra_calls
-  end
-
-  test "ignores a stale head before dispatching to an executor" do
-    execution = create_execution
-    stale = current_pull_request.deep_dup
-    stale["head"]["sha"] = "newer-head"
-    executor = counting_executor(payload)
-    publisher = counting_publisher(check: :created, comment: :created)
-
-    perform_job(execution:, client: sequence_client([ stale ]), executor:, publisher:)
-
-    assert_equal "ignored", execution.reload.status
-    assert_equal "stale", execution.outcome
-    assert_equal "stale_head", execution.failure
-    assert_equal 0, executor.calls
-    assert_equal 0, publisher.calls
-  end
-
-  test "does not publish when the baseline moves while the executor is active" do
-    execution = create_execution
-    moved = current_pull_request.deep_dup
-    moved["base"]["sha"] = "newer-base"
-    executor = counting_executor(payload)
-    publisher = counting_publisher(check: :created, comment: :created)
-
-    perform_job(
-      execution:,
-      client: sequence_client([ current_pull_request, moved ]),
-      executor:,
-      publisher:
-    )
-
-    assert_equal "ignored", execution.reload.status
-    assert_equal "stale", execution.outcome
-    assert_equal "stale_baseline_before_publish", execution.failure
-    assert_equal 1, executor.calls
-    assert_equal 0, publisher.calls
   end
 
   private
 
-  def perform_job(execution:, client:, executor:, publisher:)
+  def perform_job(execution:, client:, dispatcher:, publisher:)
     job = TestJob.new
     job.authentication_override = fake_authentication
     job.client_override = client
-    job.executor_override = executor
+    job.executor_job_override = dispatcher
     job.publisher_override = publisher
     job.perform(execution.id)
   end
@@ -127,16 +113,12 @@ class GithubPullRequestExecutionJobTest < ActiveJob::TestCase
         "repository" => "plywo/plywo",
         "pull_request_number" => 31,
         "installation_id" => 123,
-        "delivery_id" => "secret-control-plane-detail",
+        "delivery_id" => "control-plane-only",
         "baseline_ref" => "main",
         "candidate_ref" => "feature",
         "candidate_repository" => "plywo/plywo"
       }
     )
-  end
-
-  def payload
-    { "run_id" => "run", "result" => { "decision" => "allow" } }
   end
 
   def current_pull_request
@@ -173,43 +155,29 @@ class GithubPullRequestExecutionJobTest < ActiveJob::TestCase
     end
   end
 
-  def counting_executor(result)
-    Struct.new(:result, :calls, :requests) do
-      def call(request:)
-        self.calls += 1
-        requests << request
-        result
+  def counting_executor_job
+    Struct.new(:payloads) do
+      def perform_later(payload)
+        payloads << payload
       end
-    end.new(result, 0, [])
+    end.new([])
   end
 
-  def failing_executor(error)
-    Object.new.tap do |executor|
-      executor.define_singleton_method(:call) do |request:|
-        raise "missing request" unless request
-
-        raise error
-      end
+  def failing_executor_job(error)
+    Object.new.tap do |dispatcher|
+      dispatcher.define_singleton_method(:perform_later) { |_payload| raise error }
     end
   end
 
-  def counting_publisher(result)
-    Struct.new(:result, :calls, :infra_calls) do
-      def call(execution:, payload:)
-        raise "missing execution" unless execution
-        raise "missing payload" unless payload
-
-        self.calls += 1
-        result
-      end
-
+  def counting_publisher
+    Struct.new(:infra_calls) do
       def infra_failure(execution:, error:)
         raise "missing execution" unless execution
         raise "missing error" unless error
 
         self.infra_calls += 1
-        result
+        { check: :created, comment: :created }
       end
-    end.new(result, 0, 0)
+    end.new(0)
   end
 end

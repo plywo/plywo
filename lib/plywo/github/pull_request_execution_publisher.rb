@@ -51,7 +51,8 @@ module Plywo
         { check: check_action, comment: comment_action }
       end
 
-      def infra_failure(execution:, error:)
+      def infra_failure(execution:, error: nil, error_class: nil)
+        failure_class = error_class || error&.class&.to_s || "UnknownError"
         context = execution.context
         repository = context.fetch("repository")
         pr_number = Integer(context.fetch("pull_request_number"))
@@ -62,7 +63,7 @@ module Plywo
           This is an execution infrastructure failure, **not a product regression**. It is safe to re-run the check after the infrastructure issue is resolved.
 
           Execution: `#{execution.execution_id}`<br>
-          Failure class: `#{error.class}`
+          Failure class: `#{failure_class}`
         MARKDOWN
 
         check_action = check_publisher.upsert(
@@ -88,7 +89,7 @@ module Plywo
 
           Run: `#{execution.execution_id}`<br>
           Candidate: `#{execution.candidate_sha.first(8)}`<br>
-          Failure class: `#{error.class}`
+          Failure class: `#{failure_class}`
         MARKDOWN
 
         comment_action = comment_publisher.upsert(

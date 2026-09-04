@@ -1,28 +1,26 @@
-class GithubPullRequestExecutionJob < ApplicationJob
+class GithubPullRequestExecutionFinalizeJob < ApplicationJob
   queue_as :default
 
-  def perform(execution_record_id)
-    execution = PlywoExecution.find(execution_record_id)
-    return unless execution.claim!
+  def perform(execution_id, result_payload)
+    execution = PlywoExecution.find_by!(execution_id:)
+    return unless execution.status == "running"
 
+    result = Plywo::Executor::Result.from_h(result_payload)
     token = installation_token(execution:)
     pull_request = current_pull_request(execution:, token: token.value)
     if (reason = stale_reason(execution:, pull_request:))
-      ignore_stale!(execution:, reason:)
+      ignore_stale!(execution:, reason: "#{reason}_before_finalize")
       return
     end
 
-    request = Plywo::Executor::Request.from_execution(execution)
-    executor_job_class.perform_later(request.to_h)
+    if result.failure?
+      finalize_infra_failure(execution:, result:, token:)
+      return
+    end
 
-    Rails.logger.info(
-      "Plywo GitHub execution dispatched execution_id=#{execution.execution_id.inspect} " \
-      "repository=#{execution.context.fetch("repository").inspect} " \
-      "pr=#{execution.context.fetch("pull_request_number").inspect} " \
-      "attempt=#{execution.attempt_count.inspect}"
-    )
+    finalize_success(execution:, payload: result.payload, token:)
   rescue StandardError => error
-    if execution
+    if execution&.status == "running"
       execution.fail!(error)
       publish_infra_failure(execution:, error:)
     end
@@ -30,6 +28,36 @@ class GithubPullRequestExecutionJob < ApplicationJob
   end
 
   private
+
+  def finalize_success(execution:, payload:, token:)
+    publication = execution_publisher(token: token.value).call(execution:, payload:)
+    if publication.fetch(:comment) == :stale
+      execution.ignore!("stale_during_publish")
+      return
+    end
+
+    execution.complete!(payload)
+    Rails.logger.info(
+      "Plywo GitHub execution finalized execution_id=#{execution.execution_id.inspect} " \
+      "decision=#{execution.decision.inspect} outcome=#{execution.outcome.inspect} " \
+      "attempt=#{execution.attempt_count.inspect} check=#{publication.fetch(:check).inspect} " \
+      "comment=#{publication.fetch(:comment).inspect}"
+    )
+  end
+
+  def finalize_infra_failure(execution:, result:, token:)
+    execution.fail_details!(error_class: result.error_class, error_message: result.error_message)
+    publication = execution_publisher(token: token.value).infra_failure(
+      execution:,
+      error_class: result.error_class
+    )
+
+    Rails.logger.info(
+      "Plywo GitHub execution infra failure finalized execution_id=#{execution.execution_id.inspect} " \
+      "attempt=#{execution.attempt_count.inspect} error_class=#{result.error_class.inspect} " \
+      "check=#{publication.fetch(:check).inspect} comment=#{publication.fetch(:comment).inspect}"
+    )
+  end
 
   def installation_token(execution:)
     app_authentication.installation_token(
@@ -63,12 +91,7 @@ class GithubPullRequestExecutionJob < ApplicationJob
     pull_request = current_pull_request(execution:, token: token.value)
     return if stale_reason(execution:, pull_request:)
 
-    publication = execution_publisher(token: token.value).infra_failure(execution:, error:)
-    Rails.logger.info(
-      "Plywo GitHub execution infra failure execution_id=#{execution.execution_id.inspect} " \
-      "attempt=#{execution.attempt_count.inspect} check=#{publication.fetch(:check).inspect} " \
-      "comment=#{publication.fetch(:comment).inspect}"
-    )
+    execution_publisher(token: token.value).infra_failure(execution:, error:)
   rescue StandardError => publication_error
     Rails.logger.error(
       "Plywo GitHub infra failure publication failed execution_id=#{execution.execution_id.inspect} " \
@@ -82,10 +105,6 @@ class GithubPullRequestExecutionJob < ApplicationJob
 
   def pull_request_client(token:)
     Plywo::Github::PullRequestClient.new(token:)
-  end
-
-  def executor_job_class
-    PlywoExecutorJob
   end
 
   def execution_publisher(token:)
