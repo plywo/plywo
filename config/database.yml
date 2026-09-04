@@ -8,9 +8,19 @@ development:
   database: plywo_development
 
 test:
-  <<: *default
-  database: plywo_test
+  primary:
+    <<: *default
+    url: <%= ENV.fetch("DATABASE_URL", "postgres://localhost/plywo_test") %>
+  queue:
+    <<: *default
+    url: <%= ENV.fetch("SOLID_QUEUE_DATABASE_URL", "postgres://localhost/plywo_queue_test") %>
+    migrations_paths: db/queue_migrate
 
 production:
-  <<: *default
-  url: <%= ENV["DATABASE_URL"] %>
+  primary:
+    <<: *default
+    url: <%= ENV["DATABASE_URL"] %>
+  queue:
+    <<: *default
+    url: <%= ENV.fetch("SOLID_QUEUE_DATABASE_URL", ENV["DATABASE_URL"]) %>
+    migrations_paths: db/queue_migrate
