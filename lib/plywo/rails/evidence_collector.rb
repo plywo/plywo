@@ -2,6 +2,8 @@ module Plywo
   module Rails
     class EvidenceCollector
       IGNORED_SQL_NAMES = %w[SCHEMA TRANSACTION CACHE].freeze
+      SOURCE_EXCLUDED_PREFIXES = %w[.bundle/ log/ storage/ tmp/ vendor/].freeze
+      SOURCE_EXCLUDED_PATHS = [ "lib/plywo/rails/evidence_collector.rb" ].freeze
 
       attr_reader :attributions
 
@@ -52,6 +54,7 @@ module Plywo
         return if IGNORED_SQL_NAMES.include?(payload[:name].to_s)
 
         @measurements["sql_queries"] += 1
+        record_runtime_attribution("sql_queries")
       end
 
       def record_job
@@ -74,14 +77,51 @@ module Plywo
       def record_attribution(payload)
         return unless payload[:execution_id].to_s == @execution_id.to_s
 
-        signal = payload.fetch(:signal).to_s
+        append_attribution(
+          payload.fetch(:signal).to_s,
+          path: payload.fetch(:path).to_s,
+          start_line: Integer(payload.fetch(:start_line)),
+          end_line: Integer(payload.fetch(:end_line)),
+          confidence: payload.fetch(:confidence).to_s
+        )
+      end
+
+      def record_runtime_attribution(signal)
+        source = project_callsite
+        return unless source
+
+        append_attribution(signal, **source, confidence: "runtime")
+      end
+
+      def append_attribution(signal, path:, start_line:, end_line:, confidence:)
         location = {
-          "path" => payload.fetch(:path).to_s,
-          "start_line" => Integer(payload.fetch(:start_line)),
-          "end_line" => Integer(payload.fetch(:end_line)),
-          "confidence" => payload.fetch(:confidence).to_s
+          "path" => path,
+          "start_line" => start_line,
+          "end_line" => end_line,
+          "confidence" => confidence
         }
         @attributions[signal] << location unless @attributions[signal].include?(location)
+      end
+
+      def project_callsite
+        root = "#{Rails.root.expand_path}/"
+
+        caller_locations(2, 100).each do |location|
+          absolute_path = location.absolute_path || location.path
+          next unless absolute_path&.start_with?(root)
+
+          path = absolute_path.delete_prefix(root)
+          next if SOURCE_EXCLUDED_PATHS.include?(path)
+          next if SOURCE_EXCLUDED_PREFIXES.any? { |prefix| path.start_with?(prefix) }
+
+          return {
+            path:,
+            start_line: location.lineno,
+            end_line: location.lineno
+          }
+        end
+
+        nil
       end
 
       def current_execution?
