@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_04_201000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_04_211000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -84,6 +84,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_201000) do
     t.string "execution_id", null: false
     t.text "failure"
     t.datetime "finished_at"
+    t.datetime "heartbeat_at"
+    t.datetime "lease_expires_at"
     t.jsonb "result", default: {}, null: false
     t.string "scenario_id", null: false
     t.string "source", null: false
@@ -94,6 +96,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_201000) do
     t.integer "attempt_count", default: 0, null: false
     t.index ["execution_id"], name: "index_plywo_executions_on_execution_id", unique: true
     t.index ["outcome"], name: "index_plywo_executions_on_outcome"
+    t.index ["status", "lease_expires_at"], name: "index_plywo_executions_on_status_and_lease_expires_at"
     t.index ["status"], name: "index_plywo_executions_on_status"
   end
 end
