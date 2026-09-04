@@ -17,6 +17,7 @@ module Plywo
         @runner_factory = runner_factory || lambda do |repository_root:|
           Plywo::Github::LocalPullRequestRunner.new(
             root: repository_root,
+            tool_root: @root,
             fetch_repository: false
           )
         end
