@@ -9,6 +9,8 @@ module Plywo
         case mode
         when "local"
           LocalAdapter.new(root:)
+        when "git_clone"
+          GitCloneAdapter.new(root:)
         when "disabled"
           raise Error, "Plywo executor service adapter is disabled"
         else
