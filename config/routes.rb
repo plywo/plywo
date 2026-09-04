@@ -8,6 +8,8 @@ Rails.application.routes.draw do
 
   if Rails.env.test? || ENV["PLYWO_EXECUTOR_SERVICE"] == "1"
     post "/v1/executions" => "executor/executions#create", as: :executor_service_executions
+    post "/v1/executions/:execution_id/attempts/:attempt_number/cancel" => "executor/executions#cancel",
+      as: :cancel_executor_service_execution
   end
 
   if Rails.env.development? || Rails.env.test?
