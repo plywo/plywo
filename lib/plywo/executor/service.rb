@@ -14,7 +14,7 @@ module Plywo
         )
       end
 
-      def call(idempotency_key:, request_payload:)
+      def call(idempotency_key:, request_payload:, repository_capability: nil)
         request = Request.from_h(request_payload)
         validate_idempotency_key!(idempotency_key:, request:)
         canonical_payload = request.to_h
@@ -26,7 +26,7 @@ module Plywo
         when :in_progress
           raise RequestInProgress, "Executor request is already processing"
         when :execute
-          execute_and_complete(acquisition:, request:)
+          execute_and_complete(acquisition:, request:, repository_capability:)
         else
           raise Error, "Unsupported executor request acquisition state #{acquisition.state.inspect}"
         end
@@ -51,8 +51,8 @@ module Plywo
         raise RequestConflict, error.message
       end
 
-      def execute_and_complete(acquisition:, request:)
-        result = @adapter.call(request:)
+      def execute_and_complete(acquisition:, request:, repository_capability:)
+        result = @adapter.call(request:, repository_capability:)
         unless result.is_a?(Result)
           result = Result.failure(TypeError.new("Executor service adapter must return Plywo::Executor::Result"))
         end
