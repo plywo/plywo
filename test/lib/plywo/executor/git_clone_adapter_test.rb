@@ -73,7 +73,13 @@ class PlywoExecutorGitCloneAdapterTest < ActiveSupport::TestCase
   end
 
   test "fails closed for a fork until multiple repository capabilities are modeled" do
-    request = executor_request.with(
+    request = Plywo::Executor::Request.new(
+      schema_version: executor_request.schema_version,
+      execution_id: executor_request.execution_id,
+      scenario_id: executor_request.scenario_id,
+      baseline_sha: executor_request.baseline_sha,
+      candidate_sha: executor_request.candidate_sha,
+      attempt_number: executor_request.attempt_number,
       context: executor_request.context.merge("candidate_repository" => "someone/fork")
     )
     result = Plywo::Executor::GitCloneAdapter.new(
