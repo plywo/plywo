@@ -1,5 +1,13 @@
 require "test_helper"
 
+class PlywoDurableEvidenceProbeJob < ApplicationJob
+  def perform
+    ApplicationRecord.connection.select_value("SELECT 1")
+    DemoMailer.notification(Current.plywo_execution_id).deliver_now
+    Net::HTTP.get(URI.parse(Plywo::Demo::LoopbackHttpServer.url))
+  end
+end
+
 class PlywoFailingEvidenceJob < ApplicationJob
   def perform
     ApplicationRecord.connection.select_value("SELECT 1")
@@ -30,7 +38,7 @@ class PlywoRailsDurableEvidenceBufferTest < ActiveSupport::TestCase
         plywo_run_id: run_id,
         plywo_subject: "candidate"
       ) do
-        serialized_job = DemoAsyncEvidenceJob.new.serialize
+        serialized_job = PlywoDurableEvidenceProbeJob.new.serialize
       end
     end
 
@@ -45,9 +53,9 @@ class PlywoRailsDurableEvidenceBufferTest < ActiveSupport::TestCase
     assert records.all? { |record| record.run_id == run_id }
     assert records.all? { |record| record.subject == "candidate" }
     assert records.all? { |record| record.producer_kind == "active_job" }
-    assert records.all? { |record| record.producer_name == "DemoAsyncEvidenceJob" }
+    assert records.all? { |record| record.producer_name == "PlywoDurableEvidenceProbeJob" }
     assert records.all? { |record| record.producer_id.present? }
-    assert records.all? { |record| record.path == "app/jobs/demo_async_evidence_job.rb" }
+    assert records.all? { |record| record.path == "test/lib/plywo/rails/durable_evidence_buffer_test.rb" }
     assert records.all? { |record| record.confidence == "runtime" }
     assert_nil Current.plywo_execution_id
   end
