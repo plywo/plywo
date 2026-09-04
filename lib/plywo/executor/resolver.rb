@@ -11,7 +11,7 @@ module Plywo
         when "local"
           LocalAdapter.new(root:)
         when "remote"
-          remote_adapter(env:)
+          remote_adapter(root:, env:)
         when "disabled"
           raise Error, "Plywo executor is disabled"
         else
@@ -19,7 +19,7 @@ module Plywo
         end
       end
 
-      def self.remote_adapter(env:)
+      def self.remote_adapter(root:, env:)
         url = env["PLYWO_REMOTE_EXECUTOR_URL"].to_s
         token = env["PLYWO_REMOTE_EXECUTOR_TOKEN"].to_s
         raise Error, "PLYWO_REMOTE_EXECUTOR_URL is required" if url.empty?
@@ -35,7 +35,8 @@ module Plywo
           read_timeout: env.fetch(
             "PLYWO_REMOTE_EXECUTOR_READ_TIMEOUT_SECONDS",
             HttpAdapter::DEFAULT_READ_TIMEOUT_SECONDS
-          )
+          ),
+          repository_capability_provider: Plywo::Github::RepositoryCapabilityProvider.new(root:)
         )
       rescue HttpAdapter::Error, ArgumentError => error
         raise Error, error.message
