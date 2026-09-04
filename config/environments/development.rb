@@ -1,3 +1,5 @@
+require "uri"
+
 Rails.application.configure do
   config.enable_reloading = true
   config.eager_load = false
@@ -7,4 +9,12 @@ Rails.application.configure do
   config.active_record.verbose_query_logs = true
   config.action_controller.perform_caching = false
   config.active_support.deprecation = :log
+
+  # Quick Cloudflare tunnels use a random *.trycloudflare.com hostname.
+  config.hosts << /[a-z0-9-]+\.trycloudflare\.com/
+
+  if ENV["PLYWO_PUBLIC_URL"].present?
+    public_host = URI(ENV.fetch("PLYWO_PUBLIC_URL")).host
+    config.hosts << public_host if public_host
+  end
 end

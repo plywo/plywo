@@ -1,0 +1,37 @@
+<main style="max-width: 1000px; margin: 48px auto; font-family: system-ui, sans-serif; line-height: 1.5;">
+  <h1><%= @credentials.fetch("name") %> created</h1>
+
+  <% if @credential_env_path %>
+    <p>
+      Development credentials were saved locally to ignored files.
+      The running Rails process also received the webhook secret, so you can install the App immediately.
+    </p>
+    <pre style="white-space: pre-wrap; background: #f6f8fa; padding: 16px; border-radius: 8px;">source <%= @credential_env_path %></pre>
+  <% else %>
+    <p>GitHub returned the App credentials. Save them before leaving this page.</p>
+  <% end %>
+
+  <h2>App identity</h2>
+  <pre style="white-space: pre-wrap; background: #f6f8fa; padding: 16px; border-radius: 8px;">PLYWO_GITHUB_APP_ID=<%= @credentials.fetch("id") %>
+PLYWO_GITHUB_CLIENT_ID=<%= @credentials.fetch("client_id") %>
+PLYWO_GITHUB_WEBHOOK_SECRET=<%= @credentials.fetch("webhook_secret") %>
+PLYWO_GITHUB_PRIVATE_KEY_PATH=<%= @private_key_path %></pre>
+
+  <h2>Private key</h2>
+  <% if @credential_env_path %>
+    <p>Saved to <code><%= @private_key_path %></code> with mode 0600.</p>
+  <% else %>
+    <p>Save this exact PEM to <code><%= @private_key_path %></code> and chmod it to 600:</p>
+  <% end %>
+  <pre style="white-space: pre-wrap; background: #f6f8fa; padding: 16px; border-radius: 8px;"><%= @credentials.fetch("pem") %></pre>
+
+  <h2>Next</h2>
+  <ol>
+    <li><a href="<%= @install_url %>">Install <%= @credentials.fetch("name") %></a> on <code>plywo/plywo</code>.</li>
+    <li>Select only the <code>plywo/plywo</code> repository for the development installation.</li>
+    <li>Watch the Rails log for verified <code>installation</code> and <code>pull_request</code> deliveries.</li>
+    <li>For a future Rails process, run <code>source <%= @credential_env_path || "tmp/github-app/development.env" %></code> before starting the server.</li>
+  </ol>
+
+  <p><strong>Do not commit the PEM or secrets.</strong> The repository ignores <code>tmp/*</code> and <code>.env*</code>.</p>
+</main>

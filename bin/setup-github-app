@@ -1,0 +1,473 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+log() { printf '\n==> %s\n' "$*"; }
+warn() { printf '\nWARNING: %s\n' "$*" >&2; }
+die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
+
+select_environment() {
+  local requested="${1:-}"
+
+  case "$requested" in
+    development|dev|"") ;;
+    staging|stage|stg) requested="staging" ;;
+    production|prod) requested="production" ;;
+    *) die "Unknown environment: ${requested}. Use development, staging, or production." ;;
+  esac
+
+  if [[ -z "$requested" ]]; then
+    if [[ ! -t 0 ]]; then
+      requested="development"
+    else
+      printf '\nPlywo GitHub App setup\n\n'
+      printf '  1) Development\n'
+      printf '  2) Staging\n'
+      printf '  3) Production\n\n'
+      read -r -p 'Environment [1]: ' choice
+      case "${choice:-1}" in
+        1|development|dev) requested="development" ;;
+        2|staging|stage|stg) requested="staging" ;;
+        3|production|prod) requested="production" ;;
+        *) die "Unknown selection: ${choice}" ;;
+      esac
+    fi
+  fi
+
+  ENVIRONMENT="$requested"
+
+  case "$ENVIRONMENT" in
+    development)
+      APP_NAME="Plywo Development"
+      APP_SLUG="plywo-development"
+      MANIFEST_PATH=".github/app-manifest.development.json"
+      ;;
+    staging)
+      APP_NAME="Plywo Staging"
+      APP_SLUG="plywo-staging"
+      MANIFEST_PATH=".github/app-manifest.staging.json"
+      ;;
+    production)
+      APP_NAME="Plywo"
+      APP_SLUG="plywo"
+      MANIFEST_PATH=".github/app-manifest.json"
+      ;;
+  esac
+
+  export PLYWO_GITHUB_APP_MANIFEST_ENV="$ENVIRONMENT"
+  export PLYWO_GITHUB_APP_OWNER="${PLYWO_GITHUB_APP_OWNER:-plywo}"
+}
+
+select_environment "${1:-}"
+
+PORT="${PORT:-3000}"
+LOCAL_URL="http://127.0.0.1:${PORT}"
+TUNNEL_NAME="${PLYWO_CLOUDFLARED_TUNNEL_NAME:-plywo-${ENVIRONMENT}}"
+TUNNEL_MODE="${PLYWO_TUNNEL_MODE:-auto}"
+TMP_BASE="${TMPDIR:-/tmp}/plywo-github-app-${ENVIRONMENT}"
+CF_LOG="${TMP_BASE}.cloudflared.log"
+RAILS_LOG="${TMP_BASE}.rails.log"
+CF_PID=""
+RAILS_PID=""
+TAIL_PID=""
+APP_ALREADY_CONFIGURED=0
+
+cleanup() {
+  set +e
+  [[ -n "$TAIL_PID" ]] && kill "$TAIL_PID" 2>/dev/null
+  [[ -n "$RAILS_PID" ]] && kill "$RAILS_PID" 2>/dev/null
+  [[ -n "$CF_PID" ]] && kill "$CF_PID" 2>/dev/null
+}
+trap cleanup EXIT INT TERM
+
+wait_for_http() {
+  local url="$1"
+  local attempts="${2:-30}"
+  local i
+
+  for ((i = 1; i <= attempts; i++)); do
+    if curl -fsS --connect-timeout 2 --max-time 5 "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+ensure_brew() {
+  command -v brew >/dev/null 2>&1 || die "Homebrew is required on macOS: https://brew.sh"
+}
+
+ensure_tool() {
+  local tool="$1"
+  local formula="$2"
+
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    ensure_brew
+    log "Installing ${formula}"
+    brew install "$formula"
+  fi
+}
+
+ensure_mise_ruby() {
+  ensure_tool mise mise
+
+  log "Installing project runtime from mise.toml"
+  if ! mise install; then
+    warn "mise could not install the configured runtime. Updating mise and retrying."
+    ensure_brew
+    brew upgrade mise || brew reinstall mise
+    hash -r
+    mise install
+  fi
+
+  local ruby_version
+  ruby_version="$(mise exec -- ruby -e 'print RUBY_VERSION')"
+  [[ "$ruby_version" == "3.4.10" ]] || die "Expected Ruby 3.4.10, got ${ruby_version}"
+  log "Ruby ${ruby_version} is ready"
+}
+
+ensure_dependencies() {
+  log "Checking Ruby dependencies"
+  if ! mise exec -- bundle check; then
+    mise exec -- bundle install
+  fi
+}
+
+start_homebrew_postgres() {
+  ensure_brew
+
+  if ! brew list --versions postgresql@17 >/dev/null 2>&1; then
+    log "Installing PostgreSQL 17"
+    brew install postgresql@17
+  fi
+
+  export PATH="$(brew --prefix postgresql@17)/bin:$PATH"
+  log "Starting PostgreSQL 17"
+  brew services start postgresql@17 >/dev/null
+
+  local i
+  for ((i = 1; i <= 20; i++)); do
+    if pg_isready -q >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+prepare_database() {
+  log "Preparing database"
+  if mise exec -- bin/rails db:prepare; then
+    return 0
+  fi
+
+  warn "Database preparation failed. Trying Homebrew PostgreSQL 17."
+  start_homebrew_postgres || die "PostgreSQL did not become ready"
+  mise exec -- bin/rails db:prepare || die "Database preparation still fails after PostgreSQL startup"
+}
+
+source_github_app_credentials() {
+  local env_file="tmp/github-app/${ENVIRONMENT}.env"
+
+  if [[ ! -f "$env_file" ]]; then
+    return 0
+  fi
+
+  log "Loading existing ${APP_NAME} credentials"
+  # shellcheck disable=SC1090
+  source "$env_file"
+
+  if [[ -n "${PLYWO_GITHUB_APP_ID:-}" && \
+        -n "${PLYWO_GITHUB_CLIENT_ID:-}" && \
+        -n "${PLYWO_GITHUB_WEBHOOK_SECRET:-}" && \
+        -n "${PLYWO_GITHUB_PRIVATE_KEY_PATH:-}" && \
+        -f "${PLYWO_GITHUB_PRIVATE_KEY_PATH}" ]]; then
+    APP_ALREADY_CONFIGURED=1
+    log "Existing ${APP_NAME} detected. Manifest registration will be skipped."
+  else
+    warn "${env_file} exists but is incomplete. Registration flow will remain available."
+  fi
+}
+
+normalize_public_url() {
+  local value="$1"
+  value="${value%/}"
+  [[ "$value" == https://* ]] || die "PLYWO_PUBLIC_URL must start with https://"
+
+  local remainder="${value#https://}"
+  [[ "$remainder" != */* ]] || die "PLYWO_PUBLIC_URL must be an HTTPS origin without a path"
+  printf '%s' "$value"
+}
+
+public_hostname() {
+  local value
+  value="$(normalize_public_url "$1")"
+  printf '%s' "${value#https://}"
+}
+
+clear_stale_quick_tunnel_url() {
+  if [[ "${PLYWO_PUBLIC_URL:-}" == https://*.trycloudflare.com ]]; then
+    warn "Ignoring an exported trycloudflare.com URL because Quick Tunnel hostnames are ephemeral."
+    unset PLYWO_PUBLIC_URL
+  fi
+}
+
+quick_tunnel_api_reachable() {
+  curl -4 -sS -o /dev/null --connect-timeout 5 --max-time 8 https://api.trycloudflare.com/
+}
+
+start_quick_tunnel() {
+  [[ "$ENVIRONMENT" == "development" ]] || die "Quick Tunnel is allowed only for Development"
+
+  : >"$CF_LOG"
+  log "Starting Cloudflare Quick Tunnel"
+  cloudflared tunnel --url "$LOCAL_URL" >"$CF_LOG" 2>&1 &
+  CF_PID=$!
+
+  local i public_url
+  for ((i = 1; i <= 30; i++)); do
+    public_url="$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' "$CF_LOG" | tail -1 || true)"
+    if [[ -n "$public_url" ]]; then
+      export PLYWO_PUBLIC_URL="$public_url"
+      log "Quick Tunnel: ${PLYWO_PUBLIC_URL}"
+      return 0
+    fi
+
+    if ! kill -0 "$CF_PID" 2>/dev/null; then
+      cat "$CF_LOG" >&2
+      die "cloudflared exited before returning a Quick Tunnel URL"
+    fi
+    sleep 1
+  done
+
+  cat "$CF_LOG" >&2
+  die "Timed out waiting for a Quick Tunnel URL"
+}
+
+ensure_cloudflare_login() {
+  local cert_path="${HOME}/.cloudflared/cert.pem"
+
+  if [[ ! -f "$cert_path" ]]; then
+    log "Cloudflare login is required once for a locally managed named tunnel"
+    cloudflared tunnel login
+    [[ -f "$cert_path" ]] || die "Cloudflare login did not create ${cert_path}"
+  fi
+}
+
+find_named_tunnel_id() {
+  cloudflared tunnel list 2>/dev/null | awk -v name="$TUNNEL_NAME" 'NR > 1 && $2 == name { print $1; exit }'
+}
+
+prompt_public_hostname() {
+  local example hostname
+  case "$ENVIRONMENT" in
+    development) example="github-dev.example.com" ;;
+    staging) example="github-staging.example.com" ;;
+    production) example="github.example.com" ;;
+  esac
+
+  [[ -t 0 ]] || die "Set PLYWO_PUBLIC_URL=https://your-hostname and rerun"
+  printf '\nEnter the stable Cloudflare hostname for %s\n' "$APP_NAME"
+  printf 'Example: %s\n' "$example"
+  read -r -p 'Hostname: ' hostname
+  [[ -n "$hostname" ]] || die "A hostname is required"
+  printf 'https://%s' "$hostname"
+}
+
+start_local_named_tunnel() {
+  local public_url="${PLYWO_PUBLIC_URL:-}"
+  local hostname=""
+
+  if [[ -z "$public_url" ]]; then
+    public_url="$(prompt_public_hostname)"
+  fi
+
+  public_url="$(normalize_public_url "$public_url")"
+  export PLYWO_PUBLIC_URL="$public_url"
+  hostname="$(public_hostname "$public_url")"
+
+  ensure_cloudflare_login
+
+  local tunnel_id
+  tunnel_id="$(find_named_tunnel_id || true)"
+  if [[ -z "$tunnel_id" ]]; then
+    log "Creating named tunnel ${TUNNEL_NAME}"
+    cloudflared tunnel create "$TUNNEL_NAME"
+    tunnel_id="$(find_named_tunnel_id || true)"
+    [[ -n "$tunnel_id" ]] || die "Could not find ${TUNNEL_NAME} after creation"
+  fi
+
+  log "Ensuring DNS route ${hostname} -> ${TUNNEL_NAME}"
+  if ! cloudflared tunnel route dns "$TUNNEL_NAME" "$hostname"; then
+    warn "DNS route command failed. If the hostname is already routed to this tunnel, this can be harmless."
+  fi
+
+  : >"$CF_LOG"
+  log "Starting named tunnel ${TUNNEL_NAME}"
+  cloudflared tunnel --url "$LOCAL_URL" run "$TUNNEL_NAME" >"$CF_LOG" 2>&1 &
+  CF_PID=$!
+}
+
+start_token_tunnel() {
+  [[ -n "${CLOUDFLARED_TUNNEL_TOKEN:-}" ]] || die "CLOUDFLARED_TUNNEL_TOKEN is required for token mode"
+
+  if [[ -z "${PLYWO_PUBLIC_URL:-}" ]]; then
+    PLYWO_PUBLIC_URL="$(prompt_public_hostname)"
+    export PLYWO_PUBLIC_URL
+  fi
+
+  PLYWO_PUBLIC_URL="$(normalize_public_url "$PLYWO_PUBLIC_URL")"
+  export PLYWO_PUBLIC_URL
+
+  : >"$CF_LOG"
+  log "Starting Cloudflare tunnel using token"
+  cloudflared tunnel run --token "$CLOUDFLARED_TUNNEL_TOKEN" >"$CF_LOG" 2>&1 &
+  CF_PID=$!
+}
+
+start_tunnel() {
+  ensure_tool cloudflared cloudflared
+  clear_stale_quick_tunnel_url
+
+  case "$TUNNEL_MODE" in
+    quick)
+      quick_tunnel_api_reachable || die "api.trycloudflare.com is unreachable from this network"
+      start_quick_tunnel
+      ;;
+    named)
+      if [[ -n "${CLOUDFLARED_TUNNEL_TOKEN:-}" ]]; then
+        start_token_tunnel
+      else
+        start_local_named_tunnel
+      fi
+      ;;
+    external)
+      [[ -n "${PLYWO_PUBLIC_URL:-}" ]] || die "PLYWO_PUBLIC_URL is required in external tunnel mode"
+      PLYWO_PUBLIC_URL="$(normalize_public_url "$PLYWO_PUBLIC_URL")"
+      export PLYWO_PUBLIC_URL
+      : >"$CF_LOG"
+      ;;
+    auto)
+      if [[ -n "${CLOUDFLARED_TUNNEL_TOKEN:-}" ]]; then
+        start_token_tunnel
+      elif [[ -n "${PLYWO_PUBLIC_URL:-}" ]]; then
+        start_local_named_tunnel
+      elif [[ "$ENVIRONMENT" == "development" ]] && quick_tunnel_api_reachable; then
+        start_quick_tunnel
+      else
+        if [[ "$ENVIRONMENT" == "development" ]]; then
+          warn "Quick Tunnel is unavailable. Falling back to a stable named tunnel."
+        fi
+        start_local_named_tunnel
+      fi
+      ;;
+    *)
+      die "Unknown PLYWO_TUNNEL_MODE=${TUNNEL_MODE}. Use auto, quick, named, or external."
+      ;;
+  esac
+}
+
+ensure_port_free() {
+  if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    die "Port ${PORT} is already in use. Stop the existing process or run with PORT=<other-port>."
+  fi
+}
+
+start_rails() {
+  ensure_port_free
+  : >"$RAILS_LOG"
+
+  log "Starting Rails bootstrap UI on ${LOCAL_URL}"
+  mise exec -- bin/rails server -b 127.0.0.1 -p "$PORT" >"$RAILS_LOG" 2>&1 &
+  RAILS_PID=$!
+
+  if ! wait_for_http "${LOCAL_URL}/up" 30; then
+    cat "$RAILS_LOG" >&2
+    die "Rails did not become healthy"
+  fi
+
+  log "Local Rails health check passed"
+}
+
+verify_public_endpoint() {
+  local public_url
+  public_url="$(normalize_public_url "$PLYWO_PUBLIC_URL")"
+  export PLYWO_PUBLIC_URL="$public_url"
+
+  log "Checking public endpoint ${public_url}/up"
+  if ! wait_for_http "${public_url}/up" 45; then
+    printf '\n--- Rails log ---\n' >&2
+    tail -80 "$RAILS_LOG" >&2 || true
+    printf '\n--- cloudflared log ---\n' >&2
+    tail -80 "$CF_LOG" >&2 || true
+    die "Public endpoint did not become healthy"
+  fi
+
+  log "Public endpoint is healthy"
+}
+
+finish_setup() {
+  local registration_url="${PLYWO_PUBLIC_URL}/github/app/register"
+  local settings_url="https://github.com/organizations/${PLYWO_GITHUB_APP_OWNER}/settings/apps/${APP_SLUG}"
+  local install_url="https://github.com/apps/${APP_SLUG}/installations/new"
+
+  printf '\n%s is ready.\n' "$APP_NAME"
+  printf 'Environment: %s\n' "$ENVIRONMENT"
+  printf 'Public URL:  %s\n' "$PLYWO_PUBLIC_URL"
+  printf 'Rails log:   %s\n' "$RAILS_LOG"
+  printf 'Tunnel log:  %s\n' "$CF_LOG"
+
+  if [[ "$APP_ALREADY_CONFIGURED" == "1" ]]; then
+    printf '\nExisting GitHub App detected. No new App will be created.\n'
+    printf 'Settings: %s\n' "$settings_url"
+    printf 'Install:  %s\n' "$install_url"
+
+    if [[ "${PLYWO_OPEN_INSTALL:-0}" == "1" && "${NO_OPEN:-0}" != "1" ]] && command -v open >/dev/null 2>&1; then
+      open "$install_url"
+    fi
+  else
+    printf 'Manifest:    %s\n' "$MANIFEST_PATH"
+    printf 'Registration: %s\n' "$registration_url"
+
+    if [[ "${NO_OPEN:-0}" != "1" ]] && command -v open >/dev/null 2>&1; then
+      open "$registration_url"
+    fi
+  fi
+
+  printf '\nPress Ctrl-C to stop Rails and any tunnel process started by this script.\n\n'
+}
+
+main() {
+  [[ -f Gemfile && -f mise.toml ]] || die "Run this script from the plywo repository"
+  [[ -f "$MANIFEST_PATH" ]] || die "Manifest does not exist: ${MANIFEST_PATH}"
+
+  log "GitHub App environment: ${ENVIRONMENT} (${APP_NAME})"
+
+  ensure_mise_ruby
+  ensure_dependencies
+  prepare_database
+  source_github_app_credentials
+  start_tunnel
+  start_rails
+  verify_public_endpoint
+  finish_setup
+
+  touch "$CF_LOG" "$RAILS_LOG"
+  tail -n 40 -f "$RAILS_LOG" "$CF_LOG" &
+  TAIL_PID=$!
+
+  while kill -0 "$RAILS_PID" 2>/dev/null; do
+    if [[ -n "$CF_PID" ]] && ! kill -0 "$CF_PID" 2>/dev/null; then
+      warn "cloudflared stopped unexpectedly"
+      break
+    fi
+    sleep 2
+  done
+}
+
+main
