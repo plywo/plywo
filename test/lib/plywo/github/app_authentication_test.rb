@@ -44,6 +44,7 @@ class PlywoGithubAppAuthenticationTest < ActiveSupport::TestCase
       call = authentication.calls.fetch(0)
       assert_equal :post, call.fetch(:method)
       assert_equal "/app/installations/158885061/access_tokens", call.fetch(:path)
+      assert_empty call.fetch(:body)
 
       jwt = call.fetch(:authorization).delete_prefix("Bearer ")
       encoded_header, encoded_payload, encoded_signature = jwt.split(".")
@@ -56,6 +57,35 @@ class PlywoGithubAppAuthenticationTest < ActiveSupport::TestCase
       assert_equal now.to_i - 60, payload.fetch("iat")
       assert_equal now.to_i + 540, payload.fetch("exp")
       assert rsa.public_key.verify(OpenSSL::Digest::SHA256.new, signature, "#{encoded_header}.#{encoded_payload}")
+    end
+  end
+
+  test "narrows an installation token to one repository and contents read" do
+    rsa = OpenSSL::PKey::RSA.generate(2048)
+
+    Dir.mktmpdir do |directory|
+      key_path = File.join(directory, "app.pem")
+      File.write(key_path, rsa.to_pem)
+
+      authentication = FakeAuthentication.new(
+        response: { "token" => "scoped-token", "expires_at" => "2026-09-04T18:30:00Z" },
+        app_id: 4_831_516,
+        private_key_path: key_path
+      )
+
+      authentication.installation_token(
+        installation_id: 159_078_958,
+        repositories: [ "plywo" ],
+        permissions: { contents: "read" }
+      )
+
+      assert_equal(
+        {
+          repositories: [ "plywo" ],
+          permissions: { contents: "read" }
+        },
+        authentication.calls.fetch(0).fetch(:body)
+      )
     end
   end
 
