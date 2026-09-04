@@ -9,6 +9,7 @@ permissions:
   contents: read
   issues: write
   pull-requests: write
+  checks: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -115,6 +116,16 @@ jobs:
           PLYWO_CANDIDATE_INPUT: /tmp/plywo-candidate.json
           PLYWO_OUTPUT: tmp/plywo-git-comparison.json
         run: bin/rails plywo:compare_executions
+
+      - name: Publish Plywo GitHub check
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PLYWO_INPUT: tmp/plywo-git-comparison.json
+          PLYWO_PUBLISH: "1"
+          PLYWO_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+          PLYWO_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bin/rails plywo:github_check
 
       - name: Publish Plywo GitHub feedback
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository

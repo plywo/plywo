@@ -68,4 +68,31 @@ namespace :plywo do
     )
     puts "Plywo GitHub comment #{action}."
   end
+
+  desc "Publish the Plywo behavioral decision as a GitHub Check Run"
+  task github_check: :environment do
+    payload = JSON.parse(File.read(ENV.fetch("PLYWO_INPUT")))
+    rendered = Plywo::Github::CheckRenderer.call(payload:, run_url: ENV["PLYWO_RUN_URL"])
+
+    puts "#{rendered.fetch("name")}: #{rendered.fetch("conclusion")} - #{rendered.fetch("title")}"
+    puts rendered.fetch("summary")
+
+    next unless ENV["PLYWO_PUBLISH"] == "1"
+
+    publisher = Plywo::Github::CheckPublisher.new(
+      token: ENV.fetch("GITHUB_TOKEN"),
+      api_url: ENV.fetch("GITHUB_API_URL", "https://api.github.com")
+    )
+    action = publisher.upsert(
+      repository: ENV.fetch("GITHUB_REPOSITORY"),
+      head_sha: ENV.fetch("PLYWO_CANDIDATE_SHA"),
+      name: rendered.fetch("name"),
+      external_id: payload.fetch("run_id"),
+      details_url: ENV.fetch("PLYWO_RUN_URL"),
+      conclusion: rendered.fetch("conclusion"),
+      title: rendered.fetch("title"),
+      summary: rendered.fetch("summary")
+    )
+    puts "Plywo GitHub check #{action}."
+  end
 end
