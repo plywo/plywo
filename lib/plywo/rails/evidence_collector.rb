@@ -104,7 +104,7 @@ module Plywo
       end
 
       def project_callsite
-        root = "#{Rails.root.expand_path}/"
+        root = "#{::Rails.root.expand_path}/"
 
         caller_locations(2, 100).each do |location|
           absolute_path = location.absolute_path || location.path
