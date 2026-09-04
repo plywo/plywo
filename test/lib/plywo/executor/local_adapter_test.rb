@@ -1,7 +1,7 @@
 require "test_helper"
 
 class PlywoExecutorLocalAdapterTest < ActiveSupport::TestCase
-  test "delegates the portable request to the existing local runner" do
+  test "delegates the portable request and returns a successful portable result" do
     requests = []
     runner = Object.new
     runner.define_singleton_method(:call) do |execution:|
@@ -9,7 +9,33 @@ class PlywoExecutorLocalAdapterTest < ActiveSupport::TestCase
       { "result" => { "decision" => "allow" } }
     end
 
-    request = Plywo::Executor::Request.new(
+    request = executor_request
+    result = Plywo::Executor::LocalAdapter.new(runner:).call(request:)
+
+    assert_equal [ request ], requests
+    assert result.success?
+    assert_equal "allow", result.payload.dig("result", "decision")
+  end
+
+  test "converts local runner failures into a portable result" do
+    runner = Object.new
+    runner.define_singleton_method(:call) do |execution:|
+      raise "missing execution" unless execution
+
+      raise RuntimeError, "worker unavailable"
+    end
+
+    result = Plywo::Executor::LocalAdapter.new(runner:).call(request: executor_request)
+
+    assert result.failure?
+    assert_equal "RuntimeError", result.error_class
+    assert_equal "worker unavailable", result.error_message
+  end
+
+  private
+
+  def executor_request
+    Plywo::Executor::Request.new(
       schema_version: "1",
       execution_id: "github-123",
       scenario_id: "scenario",
@@ -18,10 +44,5 @@ class PlywoExecutorLocalAdapterTest < ActiveSupport::TestCase
       attempt_number: 1,
       context: {}
     )
-
-    result = Plywo::Executor::LocalAdapter.new(runner:).call(request:)
-
-    assert_equal [ request ], requests
-    assert_equal "allow", result.dig("result", "decision")
   end
 end
