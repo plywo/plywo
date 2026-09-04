@@ -15,6 +15,24 @@ class PlywoExecutorServiceTest < ActiveSupport::TestCase
     assert_equal "completed", PlywoExecutorRequest.find_by!(idempotency_key: "github-123:1").status
   end
 
+  test "passes repository capability to the worker without persisting it" do
+    capability = Plywo::Executor::RepositoryCapability.new(token: "clone-token")
+    adapter = recording_adapter(Plywo::Executor::Result.success(result_payload))
+
+    result = service(adapter:).call(
+      idempotency_key: "github-123:1",
+      request_payload: request_payload,
+      repository_capability: capability
+    )
+
+    assert result.success?
+    assert_same capability, adapter.capabilities.fetch(0)
+
+    record = PlywoExecutorRequest.find_by!(idempotency_key: "github-123:1")
+    refute_includes JSON.generate(record.request_payload), "clone-token"
+    refute_includes JSON.generate(record.result), "clone-token"
+  end
+
   test "preserves a worker failure as a durable portable result" do
     failure = Plywo::Executor::Result.new(
       schema_version: "1",
@@ -34,8 +52,9 @@ class PlywoExecutorServiceTest < ActiveSupport::TestCase
 
   test "converts an adapter exception into a durable failed result" do
     adapter = Object.new
-    adapter.define_singleton_method(:call) do |request:|
+    adapter.define_singleton_method(:call) do |request:, repository_capability: nil|
       raise "missing request" unless request
+      raise "unexpected capability" if repository_capability
 
       raise RuntimeError, "worker crashed"
     end
@@ -97,13 +116,25 @@ class PlywoExecutorServiceTest < ActiveSupport::TestCase
 
   def counting_adapter(result)
     Struct.new(:result, :calls) do
-      def call(request:)
+      def call(request:, repository_capability: nil)
         raise "missing request" unless request
+        raise "unexpected capability" if repository_capability
 
         self.calls += 1
         result
       end
     end.new(result, 0)
+  end
+
+  def recording_adapter(result)
+    Struct.new(:result, :capabilities) do
+      def call(request:, repository_capability: nil)
+        raise "missing request" unless request
+
+        capabilities << repository_capability
+        result
+      end
+    end.new(result, [])
   end
 
   def request_payload
