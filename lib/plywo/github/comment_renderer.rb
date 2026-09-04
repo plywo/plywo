@@ -6,7 +6,7 @@ module Plywo
         "duration_ms" => "Request wall time",
         "process_cpu_ms" => "Request process CPU",
         "thread_cpu_ms" => "Request thread CPU",
-        "queue_wait_ms" => "Queue wait (max job)",
+        "queue_wait_ms" => "Enqueue → worker start (max job)",
         "worker_wall_ms" => "Worker wall time",
         "worker_process_cpu_ms" => "Worker process CPU",
         "worker_thread_cpu_ms" => "Worker thread CPU",
@@ -22,6 +22,11 @@ module Plywo
         "medium" => "🟠",
         "low" => "🟡"
       }.freeze
+      ASYNC_REGRESSION_CLASSIFICATIONS = %w[
+        enqueue_to_start_regression
+        worker_runtime_regression
+        mixed_async_regression
+      ].freeze
 
       def self.markdown(payload:, context: {})
         new(payload:, context:).markdown
@@ -116,15 +121,47 @@ module Plywo
           candidate = async_profile.fetch("candidate")
           lines.concat([
             "",
-            "| Async stage | Baseline | Candidate | Candidate queue share |",
+            "| Async composition | Baseline | Candidate | Candidate enqueue-to-start share |",
             "| --- | --- | --- | ---: |",
-            "| Queue → worker | #{runtime_classification(baseline)} | #{runtime_classification(candidate)} | " \
+            "| Enqueue → worker start vs worker runtime | #{async_classification(baseline)} | #{async_classification(candidate)} | " \
               "#{format_ratio(candidate.fetch("queue_share_percent"))} |"
           ])
         end
 
+        lines.concat(async_delta_lines(diagnosis["async_delta"]))
         lines << ""
         lines
+      end
+
+      def async_delta_lines(delta)
+        return [] unless delta && ASYNC_REGRESSION_CLASSIFICATIONS.include?(delta.fetch("classification", "unknown"))
+
+        enqueue_share = delta.fetch("enqueue_to_start_delta_share_percent")
+        worker_share = 100.0 - enqueue_share
+
+        [
+          "",
+          "#### Async change attribution",
+          "",
+          "> **Regression source: #{async_delta_label(delta.fetch("classification"))}.** " \
+            "Positive async latency growth: **#{format_ms_delta(delta.fetch("positive_async_delta_ms"))}**.",
+          "",
+          "| Stage | Delta | Share of positive async growth |",
+          "| --- | ---: | ---: |",
+          "| Enqueue → worker start | #{format_ms_delta(delta.fetch("queue_wait_delta_ms"))} | #{format_ratio(enqueue_share)} |",
+          "| Worker runtime | #{format_ms_delta(delta.fetch("worker_wall_delta_ms"))} | #{format_ratio(worker_share)} |"
+        ]
+      end
+
+      def async_delta_label(classification)
+        case classification
+        when "enqueue_to_start_regression"
+          "enqueue-to-start stage"
+        when "worker_runtime_regression"
+          "worker runtime"
+        else
+          "mixed async stages"
+        end
       end
 
       def findings_section
@@ -187,8 +224,31 @@ module Plywo
         signal.end_with?("_ms") ? format("%.1f ms", value) : value.to_i.to_s
       end
 
+      def format_ms_delta(value)
+        return "n/a" if value.nil?
+        return "unchanged" if value.zero?
+
+        sign = value.positive? ? "+" : ""
+        "#{sign}#{format("%.1f", value)} ms"
+      end
+
       def runtime_classification(profile)
         profile.fetch("classification", "unknown").tr("_", " ")
+      end
+
+      def async_classification(profile)
+        case profile.fetch("classification", "unknown")
+        when "queue_bound"
+          "enqueue-to-start dominates"
+        when "worker_bound"
+          "worker runtime dominates"
+        when "mixed_async"
+          "mixed async"
+        when "insufficient_signal"
+          "insufficient signal"
+        else
+          "unknown"
+        end
       end
 
       def format_ratio(value)
