@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_04_183000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_04_201000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -29,7 +29,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_183000) do
     t.datetime "started_at"
     t.string "status", default: "accepted", null: false
     t.datetime "updated_at", null: false
+    t.string "external_id"
     t.index ["delivery_id"], name: "index_github_webhook_deliveries_on_delivery_id", unique: true
+    t.index ["external_id"], name: "index_github_webhook_deliveries_on_external_id"
     t.index ["repository", "pull_request_number"], name: "idx_on_repository_pull_request_number_aa1c3f09bc"
     t.index ["status"], name: "index_github_webhook_deliveries_on_status"
   end
@@ -88,7 +90,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_183000) do
     t.datetime "started_at"
     t.string "status", default: "queued", null: false
     t.datetime "updated_at", null: false
+    t.string "outcome"
+    t.integer "attempt_count", default: 0, null: false
     t.index ["execution_id"], name: "index_plywo_executions_on_execution_id", unique: true
+    t.index ["outcome"], name: "index_plywo_executions_on_outcome"
     t.index ["status"], name: "index_plywo_executions_on_status"
   end
 end
