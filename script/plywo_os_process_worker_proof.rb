@@ -113,7 +113,7 @@ begin
   raise "Request process gained Plywo Current state from worker" if Current.plywo_execution_id
 
   signals = worker_report.fetch("evidence_signals")
-  %w[sql_queries emails http_requests].each do |signal|
+  %w[queue_wait_ms scheduled_delay_ms dispatch_wait_ms sql_queries emails http_requests].each do |signal|
     raise "Worker did not persist #{signal} evidence" unless signals.include?(signal)
   end
 
