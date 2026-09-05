@@ -7,7 +7,6 @@ module Plywo
   module Github
     class LocalPullRequestRunner
       Error = Class.new(StandardError)
-      DEFAULT_POSTGRES_URL = "postgres://localhost".freeze
 
       class CommandRunner
         def call(env:, command:, chdir:)
@@ -18,11 +17,18 @@ module Plywo
         end
       end
 
-      def initialize(root: Rails.root, tool_root: root, command_runner: CommandRunner.new, fetch_repository: true)
+      def initialize(
+        root: Rails.root,
+        tool_root: root,
+        command_runner: CommandRunner.new,
+        fetch_repository: true,
+        subject_environment: nil
+      )
         @root = Pathname(root).expand_path
         @tool_root = Pathname(tool_root).expand_path
         @command_runner = command_runner
         @fetch_repository = fetch_repository
+        @subject_environment = subject_environment || Plywo::Subject::RailsPostgresEnvironment.new(command_runner:)
       end
 
       def call(execution:)
@@ -36,15 +42,15 @@ module Plywo
         prepare_worktree!(path: paths.fetch(:baseline_root), sha: execution.baseline_sha)
         prepare_worktree!(path: paths.fetch(:candidate_root), sha: execution.candidate_sha)
 
-        prepare_database!(
+        baseline_env = @subject_environment.prepare(
           root: paths.fetch(:baseline_root),
-          primary_url: database_url(execution:, role: "base"),
-          queue_url: database_url(execution:, role: "base_queue")
+          execution:,
+          role: "base"
         )
-        prepare_database!(
+        candidate_env = @subject_environment.prepare(
           root: paths.fetch(:candidate_root),
-          primary_url: database_url(execution:, role: "candidate"),
-          queue_url: database_url(execution:, role: "candidate_queue")
+          execution:,
+          role: "candidate"
         )
 
         capture_subject!(
@@ -52,8 +58,7 @@ module Plywo
           root: paths.fetch(:baseline_root),
           label: context.fetch("baseline_ref"),
           sha: execution.baseline_sha,
-          primary_url: database_url(execution:, role: "base"),
-          queue_url: database_url(execution:, role: "base_queue"),
+          environment: baseline_env,
           output: paths.fetch(:baseline_output)
         )
         capture_subject!(
@@ -61,8 +66,7 @@ module Plywo
           root: paths.fetch(:candidate_root),
           label: context.fetch("candidate_ref"),
           sha: execution.candidate_sha,
-          primary_url: database_url(execution:, role: "candidate"),
-          queue_url: database_url(execution:, role: "candidate_queue"),
+          environment: candidate_env,
           output: paths.fetch(:candidate_output)
         )
 
@@ -72,6 +76,10 @@ module Plywo
           changed_paths: changed_paths(execution:)
         )
       ensure
+        if paths
+          @subject_environment.cleanup(root: paths.fetch(:candidate_root), execution:, role: "candidate")
+          @subject_environment.cleanup(root: paths.fetch(:baseline_root), execution:, role: "base")
+        end
         cleanup_worktree(paths&.fetch(:baseline_root, nil))
         cleanup_worktree(paths&.fetch(:candidate_root, nil))
       end
@@ -112,16 +120,8 @@ module Plywo
         run!(command: [ "git", "worktree", "add", "--detach", path.to_s, sha ], chdir: @root)
       end
 
-      def prepare_database!(root:, primary_url:, queue_url:)
-        run!(
-          env: subject_environment(root:, primary_url:, queue_url:),
-          command: [ root.join("bin", "rails").to_s, "db:prepare" ],
-          chdir: root
-        )
-      end
-
-      def capture_subject!(execution:, root:, label:, sha:, primary_url:, queue_url:, output:)
-        env = subject_environment(root:, primary_url:, queue_url:).merge(
+      def capture_subject!(execution:, root:, label:, sha:, environment:, output:)
+        env = environment.merge(
           "PLYWO_RUN_ID" => execution.execution_id,
           "PLYWO_SCENARIO_ID" => execution.scenario_id,
           "PLYWO_SUBJECT" => "github-pull-request",
@@ -137,22 +137,6 @@ module Plywo
         )
       end
 
-      def subject_environment(root:, primary_url:, queue_url:)
-        {
-          "BUNDLE_GEMFILE" => root.join("Gemfile").to_s,
-          "RAILS_ENV" => "test",
-          "DATABASE_URL" => primary_url,
-          "SOLID_QUEUE_DATABASE_URL" => queue_url,
-          "PLYWO_SOLID_QUEUE" => "1",
-          "PLYWO_ASYNC_TRANSPORT" => "solid_queue",
-          "PLYWO_SOLID_QUEUE_DIAGNOSTICS" => "1",
-          "PLYWO_SOLID_QUEUE_START_TIMEOUT_SECONDS" => "30",
-          "PLYWO_QUIESCENCE_TIMEOUT_SECONDS" => "30",
-          "SOLID_QUEUE_SKIP_RECURRING" => "true",
-          "SOLID_QUEUE_SUPERVISOR_MODE" => "async"
-        }
-      end
-
       def changed_paths(execution:)
         output = run!(
           command: [ "git", "diff", "--name-only", "#{execution.baseline_sha}...#{execution.candidate_sha}" ],
@@ -165,12 +149,6 @@ module Plywo
         baseline = Plywo::ExecutionReducer.call(execution: JSON.parse(File.read(baseline_output)))
         candidate = Plywo::ExecutionReducer.call(execution: JSON.parse(File.read(candidate_output)))
         Plywo::ExecutionPair.call(baseline:, candidate:, changed_paths:)
-      end
-
-      def database_url(execution:, role:)
-        prefix = ENV.fetch("PLYWO_LOCAL_POSTGRES_URL", DEFAULT_POSTGRES_URL).sub(%r{/+$}, "")
-        suffix = execution.execution_id.delete_prefix("github-")[0, 12]
-        "#{prefix}/plywo_app_#{suffix}_#{role}"
       end
 
       def cleanup_worktree(path)
