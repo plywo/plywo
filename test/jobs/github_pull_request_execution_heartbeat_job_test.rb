@@ -5,9 +5,11 @@ class GithubPullRequestExecutionHeartbeatJobTest < ActiveJob::TestCase
     now = Time.utc(2026, 9, 5, 0, 30, 0)
     execution = create_running_execution(now:)
 
-    travel_to(now + 10) do
-      assert_enqueued_jobs 1, only: GithubPullRequestExecutionHeartbeatJob do
-        GithubPullRequestExecutionHeartbeatJob.perform_now(execution.execution_id, execution.attempt_count)
+    Plywo::ClockAuthority.stub(:database_now, now + 10) do
+      travel_to(now + 10) do
+        assert_enqueued_jobs 1, only: GithubPullRequestExecutionHeartbeatJob do
+          GithubPullRequestExecutionHeartbeatJob.perform_now(execution.execution_id, execution.attempt_count)
+        end
       end
     end
 
@@ -21,9 +23,11 @@ class GithubPullRequestExecutionHeartbeatJobTest < ActiveJob::TestCase
     execution = create_running_execution(now:)
     execution.begin_finalization!(attempt_number: execution.attempt_count, now: now + 5)
 
-    travel_to(now + 10) do
-      assert_enqueued_jobs 1, only: GithubPullRequestExecutionHeartbeatJob do
-        GithubPullRequestExecutionHeartbeatJob.perform_now(execution.execution_id, execution.attempt_count)
+    Plywo::ClockAuthority.stub(:database_now, now + 10) do
+      travel_to(now + 10) do
+        assert_enqueued_jobs 1, only: GithubPullRequestExecutionHeartbeatJob do
+          GithubPullRequestExecutionHeartbeatJob.perform_now(execution.execution_id, execution.attempt_count)
+        end
       end
     end
 
