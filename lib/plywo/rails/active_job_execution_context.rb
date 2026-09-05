@@ -24,9 +24,8 @@ module Plywo
 
       def serialize
         payload = super.merge(CONTEXT_KEY => plywo_execution_context)
-        if @plywo_queue_timing_context.present?
-          payload[QUEUE_TIMING_KEY] = @plywo_queue_timing_context
-        end
+        timing_context = plywo_queue_timing_context
+        payload[QUEUE_TIMING_KEY] = timing_context if timing_context.present?
         payload
       end
 
@@ -43,6 +42,13 @@ module Plywo
           value = Current.public_send(attribute)
           context[attribute] = value unless value.nil?
         end
+      end
+
+      def plywo_queue_timing_context
+        return @plywo_queue_timing_context if defined?(@plywo_queue_timing_context) && @plywo_queue_timing_context.present?
+        return {} if plywo_execution_context["plywo_execution_id"].blank?
+
+        @plywo_queue_timing_context = QueueTimingContext.capture(self)
       end
 
       def normalize_plywo_execution_context(context)
