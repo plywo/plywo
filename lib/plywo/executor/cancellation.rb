@@ -13,7 +13,7 @@ module Plywo
         begin
           @notification_job.perform_later(execution.execution_id, attempt_number, reason.to_s)
         rescue StandardError => error
-          Rails.logger.warn(
+          ::Rails.logger.warn(
             "Plywo executor cancellation enqueue failed execution_id=#{execution.execution_id.inspect} " \
             "attempt=#{attempt_number.inspect} error=#{error.class}"
           )
