@@ -20,9 +20,13 @@ class PlywoSubjectRailsSqliteEnvironmentTest < ActiveSupport::TestCase
   test "prepares an isolated Rails SQLite subject environment" do
     Dir.mktmpdir do |directory|
       command_runner = CommandRecorder.new
+      bundle_path = File.join(directory, "bundle")
+      bundle_app_config = File.join(directory, "bundle-config")
       environment = Plywo::Subject::RailsSqliteEnvironment.new(
         command_runner:,
-        state_root: directory
+        state_root: directory,
+        bundle_path:,
+        bundle_app_config:
       )
       execution = Execution.new("github-abcdef1234567890")
       root = Pathname("/tmp/customer-subject")
@@ -31,6 +35,8 @@ class PlywoSubjectRailsSqliteEnvironmentTest < ActiveSupport::TestCase
 
       assert_equal File.join(directory, "plywo_subject_abcdef123456_base.sqlite3"), env.fetch("PLYWO_SQLITE_DATABASE")
       assert_equal root.join("Gemfile").to_s, env.fetch("BUNDLE_GEMFILE")
+      assert_equal File.expand_path(bundle_path), env.fetch("BUNDLE_PATH")
+      assert_equal File.expand_path(bundle_app_config), env.fetch("BUNDLE_APP_CONFIG")
       assert_nil env.fetch("DATABASE_URL")
       assert_nil env.fetch("SOLID_QUEUE_DATABASE_URL")
       assert_equal "test", env.fetch("RAILS_ENV")
