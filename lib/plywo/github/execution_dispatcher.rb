@@ -5,13 +5,18 @@ module Plywo
     class ExecutionDispatcher
       DEFAULT_SCENARIO_ID = "dogfood.git.behavior".freeze
 
-      def initialize(scenario_id: ENV.fetch("PLYWO_SCENARIO_ID", DEFAULT_SCENARIO_ID))
+      def initialize(
+        scenario_id: ENV.fetch("PLYWO_SCENARIO_ID", DEFAULT_SCENARIO_ID),
+        cancellation: Plywo::Executor::Cancellation.new
+      )
         @scenario_id = scenario_id
+        @cancellation = cancellation
       end
 
       def call(delivery:, pull_request:)
         context = build_context(delivery:, pull_request:)
         execution_id = execution_id_for(context:)
+        cancel_superseded_executions!(context:, current_execution_id: execution_id)
         existing = PlywoExecution.find_by(execution_id:)
 
         if existing
@@ -37,6 +42,20 @@ module Plywo
       end
 
       private
+
+      def cancel_superseded_executions!(context:, current_execution_id:)
+        PlywoExecution
+          .where(source: "github_pull_request", status: PlywoExecution::CANCELLABLE_STATUSES)
+          .where("context ->> 'repository' = ?", context.fetch("repository"))
+          .where("context ->> 'pull_request_number' = ?", context.fetch("pull_request_number").to_s)
+          .where.not(execution_id: current_execution_id)
+          .find_each do |execution|
+            @cancellation.call(
+              execution:,
+              reason: "superseded_by_new_pull_request_revision"
+            )
+          end
+      end
 
       def build_context(delivery:, pull_request:)
         {
