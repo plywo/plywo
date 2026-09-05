@@ -90,6 +90,19 @@ class ExecutorExecutionsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "accepts cancellation even when the worker adapter is disabled" do
+    with_executor_service_env do
+      ENV["PLYWO_EXECUTOR_SERVICE_ADAPTER"] = "disabled"
+
+      post_cancel(reason: "shutdown")
+
+      assert_response :accepted
+      record = PlywoExecutorRequest.find_by!(idempotency_key: "github-123:1")
+      assert_equal "cancelled", record.status
+      assert_equal "shutdown", record.cancellation_reason
+    end
+  end
+
   test "cancellation is idempotent but cannot replace a completed result" do
     with_executor_service_env do
       post_cancel(reason: "first")
