@@ -1,6 +1,9 @@
 require "test_helper"
+require "active_support/testing/time_helpers"
 
 class PlywoRailsQueueTimingContextTest < ActiveSupport::TestCase
+  include ActiveSupport::Testing::TimeHelpers
+
   FakeJob = Data.define(:enqueued_at, :scheduled_at)
 
   test "captures declared scheduling as a duration at enqueue time" do
@@ -27,14 +30,14 @@ class PlywoRailsQueueTimingContextTest < ActiveSupport::TestCase
       "scheduled_delay_ms" => 250.0
     }
 
-    positive_skew = Time.stub(:current, Time.utc(2036, 1, 1)) do
+    positive_skew = travel_to(Time.utc(2036, 1, 1)) do
       Plywo::Rails::QueueTimingContext.measure(
         context,
         clock_domain_id: "boot-a",
         monotonic_now: 100.41
       )
     end
-    negative_skew = Time.stub(:current, Time.utc(2016, 1, 1)) do
+    negative_skew = travel_to(Time.utc(2016, 1, 1)) do
       Plywo::Rails::QueueTimingContext.measure(
         context,
         clock_domain_id: "boot-a",
