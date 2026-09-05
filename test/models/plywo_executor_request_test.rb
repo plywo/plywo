@@ -27,8 +27,8 @@ class PlywoExecutorRequestTest < ActiveSupport::TestCase
   test "uses database-authoritative time instead of executor host wall clock by default" do
     database_now = Time.utc(2026, 9, 5, 0, 50, 0)
 
-    first = Plywo::ClockAuthority.stub(:database_now, database_now) do
-      Time.stub(:current, database_now + 12.hours) do
+    first = with_database_clock(database_now) do
+      travel_to(database_now + 12.hours) do
         PlywoExecutorRequest.acquire!(
           idempotency_key: "execution:clock",
           request_payload:,
@@ -41,8 +41,8 @@ class PlywoExecutorRequestTest < ActiveSupport::TestCase
     assert_equal database_now, first.record.started_at
     assert_equal database_now + 60, first.record.lease_expires_at
 
-    duplicate = Plywo::ClockAuthority.stub(:database_now, database_now + 30) do
-      Time.stub(:current, database_now + 1.day) do
+    duplicate = with_database_clock(database_now + 30) do
+      travel_to(database_now + 1.day) do
         PlywoExecutorRequest.acquire!(
           idempotency_key: "execution:clock",
           request_payload:,
@@ -52,8 +52,8 @@ class PlywoExecutorRequestTest < ActiveSupport::TestCase
     end
     assert_equal :in_progress, duplicate.state
 
-    reclaimed = Plywo::ClockAuthority.stub(:database_now, database_now + 61) do
-      Time.stub(:current, database_now - 1.day) do
+    reclaimed = with_database_clock(database_now + 61) do
+      travel_to(database_now - 1.day) do
         PlywoExecutorRequest.acquire!(
           idempotency_key: "execution:clock",
           request_payload:,
