@@ -24,6 +24,49 @@ class PlywoExecutorRequestTest < ActiveSupport::TestCase
     assert_nil record.lease_expires_at
   end
 
+  test "uses database-authoritative time instead of executor host wall clock by default" do
+    database_now = Time.utc(2026, 9, 5, 0, 50, 0)
+
+    first = Plywo::ClockAuthority.stub(:database_now, database_now) do
+      Time.stub(:current, database_now + 12.hours) do
+        PlywoExecutorRequest.acquire!(
+          idempotency_key: "execution:clock",
+          request_payload:,
+          lease_seconds: 60
+        )
+      end
+    end
+
+    assert_equal :execute, first.state
+    assert_equal database_now, first.record.started_at
+    assert_equal database_now + 60, first.record.lease_expires_at
+
+    duplicate = Plywo::ClockAuthority.stub(:database_now, database_now + 30) do
+      Time.stub(:current, database_now + 1.day) do
+        PlywoExecutorRequest.acquire!(
+          idempotency_key: "execution:clock",
+          request_payload:,
+          lease_seconds: 60
+        )
+      end
+    end
+    assert_equal :in_progress, duplicate.state
+
+    reclaimed = Plywo::ClockAuthority.stub(:database_now, database_now + 61) do
+      Time.stub(:current, database_now - 1.day) do
+        PlywoExecutorRequest.acquire!(
+          idempotency_key: "execution:clock",
+          request_payload:,
+          lease_seconds: 60
+        )
+      end
+    end
+
+    assert_equal :execute, reclaimed.state
+    refute_equal first.claim_token, reclaimed.claim_token
+    assert_equal database_now + 121, reclaimed.record.lease_expires_at
+  end
+
   test "returns a completed result for the same request without another claim" do
     now = Time.utc(2026, 9, 4, 21, 40, 0)
     first = acquire(now:)
