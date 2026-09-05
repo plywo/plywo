@@ -15,6 +15,24 @@ ENV["RAILS_ENV"] ||= "test"
 require TOOL_ROOT.join("config", "environment").to_s
 
 module RailsSqliteSubjectProof
+  class GuardedCommandRunner
+    def initialize(delegate:, lockfile:, expected_digest:)
+      @delegate = delegate
+      @lockfile = lockfile
+      @expected_digest = expected_digest
+    end
+
+    def call(env:, command:, chdir:)
+      @delegate.call(env:, command:, chdir:)
+    ensure
+      actual_digest = Digest::SHA256.file(@lockfile).hexdigest
+      next if actual_digest == @expected_digest
+
+      raise Plywo::Github::LocalPullRequestRunner::Error,
+        "Command mutated the Plywo control-plane lockfile: #{command.join(" ")} (chdir=#{chdir})"
+    end
+  end
+
   module_function
 
   def call
@@ -35,7 +53,11 @@ module RailsSqliteSubjectProof
         candidate_sha = commit(subject_root, "Increase SQLite query behavior")
 
         request = build_request(baseline_sha:, candidate_sha:)
-        command_runner = Plywo::Github::LocalPullRequestRunner::CommandRunner.new
+        command_runner = GuardedCommandRunner.new(
+          delegate: Plywo::Github::LocalPullRequestRunner::CommandRunner.new,
+          lockfile: TOOL_LOCKFILE,
+          expected_digest: tool_lock_digest
+        )
         environment = Plywo::Subject::RailsSqliteEnvironment.new(
           command_runner:,
           bundle_path:,
