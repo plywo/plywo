@@ -26,6 +26,8 @@ module Plywo
       def env_for(root:, execution:, role:)
         {
           "BUNDLE_GEMFILE" => root.join("Gemfile").to_s,
+          "DATABASE_URL" => nil,
+          "SOLID_QUEUE_DATABASE_URL" => nil,
           "RAILS_ENV" => "test",
           "PLYWO_SQLITE_DATABASE" => database_path(root:, execution:, role:).to_s,
           "PLYWO_ASYNC_TRANSPORT" => "test_adapter",
