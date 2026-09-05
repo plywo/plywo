@@ -1,5 +1,7 @@
 #!/usr/bin/env ruby
 
+require "bundler"
+require "digest"
 require "fileutils"
 require "open3"
 require "pathname"
@@ -7,6 +9,7 @@ require "tmpdir"
 
 TOOL_ROOT = Pathname(__dir__).join("..").expand_path.freeze
 FIXTURE_ROOT = TOOL_ROOT.join("test", "fixtures", "rails_sqlite_subject").freeze
+TOOL_LOCKFILE = TOOL_ROOT.join("Gemfile.lock").freeze
 
 ENV["RAILS_ENV"] ||= "test"
 require TOOL_ROOT.join("config", "environment").to_s
@@ -16,28 +19,41 @@ module RailsSqliteSubjectProof
 
   def call
     Dir.mktmpdir("plywo-rails-sqlite-subject-") do |directory|
-      subject_root = Pathname(directory)
-      prepare_subject_repository(subject_root)
-      ensure_subject_bundle(subject_root)
+      Dir.mktmpdir("plywo-rails-sqlite-bundle-") do |bundle_directory|
+        subject_root = Pathname(directory)
+        bundle_root = Pathname(bundle_directory)
+        bundle_path = bundle_root.join("gems")
+        bundle_app_config = bundle_root.join("config")
+        tool_lock_digest = Digest::SHA256.file(TOOL_LOCKFILE).hexdigest
 
-      baseline_sha = commit(subject_root, "Baseline SQLite behavior")
-      write_candidate_behavior(subject_root)
-      candidate_sha = commit(subject_root, "Increase SQLite query behavior")
+        prepare_subject_repository(subject_root)
+        ensure_subject_bundle(subject_root, bundle_path:, bundle_app_config:)
+        verify_tool_lock_unchanged!(tool_lock_digest)
 
-      request = build_request(baseline_sha:, candidate_sha:)
-      command_runner = Plywo::Github::LocalPullRequestRunner::CommandRunner.new
-      environment = Plywo::Subject::RailsSqliteEnvironment.new(command_runner:)
-      runner = Plywo::Github::LocalPullRequestRunner.new(
-        root: subject_root,
-        tool_root: TOOL_ROOT,
-        command_runner:,
-        fetch_repository: false,
-        subject_environment: environment
-      )
-      result = Plywo::Executor::LocalAdapter.new(runner:).call(request:)
+        baseline_sha = commit(subject_root, "Baseline SQLite behavior")
+        write_candidate_behavior(subject_root)
+        candidate_sha = commit(subject_root, "Increase SQLite query behavior")
 
-      verify!(result)
-      print_proof(request:, result:)
+        request = build_request(baseline_sha:, candidate_sha:)
+        command_runner = Plywo::Github::LocalPullRequestRunner::CommandRunner.new
+        environment = Plywo::Subject::RailsSqliteEnvironment.new(
+          command_runner:,
+          bundle_path:,
+          bundle_app_config:
+        )
+        runner = Plywo::Github::LocalPullRequestRunner.new(
+          root: subject_root,
+          tool_root: TOOL_ROOT,
+          command_runner:,
+          fetch_repository: false,
+          subject_environment: environment
+        )
+        result = Plywo::Executor::LocalAdapter.new(runner:).call(request:)
+
+        verify!(result)
+        verify_tool_lock_unchanged!(tool_lock_digest)
+        print_proof(request:, result:)
+      end
     end
   end
 
@@ -52,13 +68,14 @@ module RailsSqliteSubjectProof
     run!([ "git", "config", "user.name", "Plywo SQLite Proof" ], chdir: subject_root)
   end
 
-  def ensure_subject_bundle(subject_root)
+  def ensure_subject_bundle(subject_root, bundle_path:, bundle_app_config:)
     env = {
       "BUNDLE_GEMFILE" => subject_root.join("Gemfile").to_s,
+      "BUNDLE_PATH" => bundle_path.to_s,
+      "BUNDLE_APP_CONFIG" => bundle_app_config.to_s,
       "BUNDLE_DEPLOYMENT" => "false",
       "BUNDLE_FROZEN" => "false"
     }
-    env["BUNDLE_PATH"] = ENV["BUNDLE_PATH"] if ENV["BUNDLE_PATH"].present?
 
     Bundler.with_unbundled_env do
       return if run(%w[bundle check], chdir: subject_root, env:, allow_failure: true)
@@ -115,6 +132,13 @@ module RailsSqliteSubjectProof
     raise "Expected DATABASE_QUERY_REGRESSION from SQLite subject" unless finding
   end
 
+  def verify_tool_lock_unchanged!(expected_digest)
+    actual_digest = Digest::SHA256.file(TOOL_LOCKFILE).hexdigest
+    return if actual_digest == expected_digest
+
+    raise "SQLite subject dependency setup mutated the Plywo control-plane lockfile"
+  end
+
   def print_proof(request:, result:)
     payload = result.payload
     puts "Rails + SQLite customer subject proof"
@@ -125,6 +149,7 @@ module RailsSqliteSubjectProof
     puts "candidate_sql_queries=#{payload.dig("executions", "candidate", "measurements", "sql_queries")}"
     puts "reason_code=DATABASE_QUERY_REGRESSION"
     puts "merge_recommendation=#{payload.dig("result", "merge_recommendation")}"
+    puts "control_plane_lockfile_unchanged=true"
   end
 
   def run!(command, chdir:, env: {})
