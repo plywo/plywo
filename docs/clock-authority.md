@@ -39,7 +39,29 @@ Elapsed work inside one process uses a monotonic clock:
 Process.clock_gettime(Process::CLOCK_MONOTONIC)
 ```
 
-Monotonic timestamps are process-local measurement values. Never compare a monotonic timestamp produced on one host with a monotonic timestamp produced on another host.
+Monotonic timestamps are only comparable when both endpoints belong to the same monotonic clock domain. Never subtract monotonic values produced by different hosts or different host boots.
+
+## Active Job queue-stage evidence
+
+Rails Active Job queue timing is customer runtime evidence, not Plywo control-plane lifecycle timing.
+
+The built-in Rails instrumentation captures a monotonic enqueue timestamp together with a host-boot clock-domain identifier. It also converts deliberate scheduling into a duration at enqueue time, while both scheduling timestamps still belong to the enqueuer's local clock domain.
+
+At worker start:
+
+```text
+same host-boot clock domain
+  -> queue_wait_ms from CLOCK_MONOTONIC
+  -> scheduled_delay_ms from the declared enqueue-time duration
+  -> dispatch_wait_ms = queue_wait_ms - scheduled_delay_ms
+
+different or unknown clock domain
+  -> queue-stage timing unavailable
+```
+
+This deliberately prefers missing evidence over fabricated cross-host precision. A future queue adapter may replace this fallback with backend-owned timing when it can prove that both boundaries share one trustworthy authority.
+
+`PlywoExecutionWorkItem.enqueued_at`, `started_at`, and `finished_at` remain lifecycle/audit fields for work tracking and quiescence. Behavioral queue-stage metrics must not be derived by subtracting those host wall-clock timestamps.
 
 ## Customer runtime evidence
 
@@ -61,4 +83,4 @@ A customer subject may use SQLite, MySQL, PostgreSQL, MongoDB, DynamoDB, an exte
 
 Lifecycle methods retain an explicit `now:` seam for deterministic unit tests. Production callers omit it and therefore use PostgreSQL-authoritative time.
 
-Clock-skew tests should prove that changing a host's wall clock cannot change claim, lease, reclaim, cancellation, or expiry correctness when the database clock is unchanged.
+Clock-skew tests should prove that changing a host's wall clock cannot change claim, lease, reclaim, cancellation, expiry, or queue-stage attribution when the relevant authoritative or monotonic clock is unchanged.
