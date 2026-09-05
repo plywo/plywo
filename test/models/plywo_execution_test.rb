@@ -18,8 +18,8 @@ class PlywoExecutionTest < ActiveSupport::TestCase
     execution = create_execution
     database_now = Time.utc(2026, 9, 5, 0, 40, 0)
 
-    Plywo::ClockAuthority.stub(:database_now, database_now) do
-      Time.stub(:current, database_now + 12.hours) do
+    with_database_clock(database_now) do
+      travel_to(database_now + 12.hours) do
         assert execution.claim!(lease_seconds: 120)
         assert_equal database_now, execution.started_at
         assert_equal database_now, execution.heartbeat_at
@@ -28,8 +28,8 @@ class PlywoExecutionTest < ActiveSupport::TestCase
       end
     end
 
-    Plywo::ClockAuthority.stub(:database_now, database_now + 121) do
-      Time.stub(:current, database_now - 12.hours) do
+    with_database_clock(database_now + 121) do
+      travel_to(database_now - 12.hours) do
         assert execution.lease_expired?
         assert execution.expire_lease!
       end
