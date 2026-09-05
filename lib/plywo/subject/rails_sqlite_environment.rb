@@ -1,0 +1,55 @@
+require "fileutils"
+
+module Plywo
+  module Subject
+    class RailsSqliteEnvironment < Environment
+      def initialize(command_runner:, state_root: nil)
+        @command_runner = command_runner
+        @state_root = state_root && Pathname(state_root).expand_path
+      end
+
+      def prepare(root:, execution:, role:)
+        path = database_path(root:, execution:, role:)
+        FileUtils.mkdir_p(path.dirname)
+        remove_database_files(path)
+
+        env = env_for(root:, execution:, role:)
+        @command_runner.call(
+          env:,
+          command: [ root.join("bin", "rails").to_s, "db:prepare" ],
+          chdir: root.to_s
+        )
+        env
+      end
+
+      def env_for(root:, execution:, role:)
+        {
+          "BUNDLE_GEMFILE" => root.join("Gemfile").to_s,
+          "RAILS_ENV" => "test",
+          "PLYWO_SQLITE_DATABASE" => database_path(root:, execution:, role:).to_s,
+          "PLYWO_ASYNC_TRANSPORT" => "test_adapter",
+          "PLYWO_QUIESCENCE_TIMEOUT_SECONDS" => "30",
+          "PLYWO_QUIET_PERIOD_SECONDS" => "0.01"
+        }
+      end
+
+      def cleanup(root:, execution:, role:)
+        remove_database_files(database_path(root:, execution:, role:))
+      end
+
+      private
+
+      def database_path(root:, execution:, role:)
+        directory = @state_root || root.join("tmp", "plywo", "sqlite")
+        suffix = execution.execution_id.delete_prefix("github-")[0, 12]
+        directory.join("plywo_subject_#{suffix}_#{role}.sqlite3")
+      end
+
+      def remove_database_files(path)
+        FileUtils.rm_f(path)
+        FileUtils.rm_f("#{path}-wal")
+        FileUtils.rm_f("#{path}-shm")
+      end
+    end
+  end
+end
