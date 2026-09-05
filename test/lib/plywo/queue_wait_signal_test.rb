@@ -10,31 +10,37 @@ class PlywoQueueWaitSignalTest < ActiveSupport::TestCase
     Current.reset
   end
 
-  test "captures enqueue-to-start delay as durable per-job evidence" do
+  test "captures enqueue-to-start delay as durable per-job evidence without using work-item wall clocks" do
     execution_id = "queue-wait-execution"
     job = PlywoQueueWaitProbeJob.new
-    serialized = Current.set(
-      plywo_execution_id: execution_id,
-      plywo_run_id: "queue-wait-run",
-      plywo_subject: "candidate"
-    ) do
-      job.serialize
+
+    with_clock_domain("queue-wait-domain") do
+      serialized = Current.set(
+        plywo_execution_id: execution_id,
+        plywo_run_id: "queue-wait-run",
+        plywo_subject: "candidate"
+      ) do
+        job.serialize
+      end
+      serialized.fetch(Plywo::Rails::ActiveJobExecutionContext::QUEUE_TIMING_KEY)["enqueued_monotonic_seconds"] -= 0.2
+
+      PlywoExecutionWorkItem.create!(
+        execution_id:,
+        kind: "active_job",
+        work_id: job.job_id,
+        status: "enqueued",
+        enqueued_at: Time.current + 1.day
+      )
+
+      Current.reset
+      ActiveJob::Base.deserialize(serialized).perform_now
     end
-
-    PlywoExecutionWorkItem.create!(
-      execution_id:,
-      kind: "active_job",
-      work_id: job.job_id,
-      status: "enqueued",
-      enqueued_at: Time.current - 0.2
-    )
-
-    Current.reset
-    ActiveJob::Base.deserialize(serialized).perform_now
 
     event = PlywoEvidenceEvent.find_by!(execution_id:, signal: "queue_wait_ms")
     assert_operator event.payload.fetch("value"), :>=, 150.0
     assert_equal "enqueue_to_start", event.payload.fetch("semantics")
+    assert_equal "host_monotonic_same_boot", event.payload.fetch("timing_authority")
+    assert_equal "queue-wait-domain", event.payload.fetch("clock_domain_id")
     assert_equal "PlywoQueueWaitProbeJob", event.producer_name
   end
 
@@ -92,6 +98,15 @@ class PlywoQueueWaitSignalTest < ActiveSupport::TestCase
   end
 
   private
+
+  def with_clock_domain(value)
+    key = Plywo::Rails::HostClockDomain::EXPLICIT_DOMAIN_ENV
+    previous = ENV[key]
+    ENV[key] = value
+    yield
+  ensure
+    previous.nil? ? ENV.delete(key) : ENV[key] = previous
+  end
 
   def runtime_observation(signal, value, producer_id)
     {

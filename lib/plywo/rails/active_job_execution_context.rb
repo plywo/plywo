@@ -2,6 +2,7 @@ module Plywo
   module Rails
     module ActiveJobExecutionContext
       CONTEXT_KEY = "plywo_execution_context"
+      QUEUE_TIMING_KEY = "plywo_queue_timing"
       CONTEXT_ATTRIBUTES = %w[plywo_execution_id plywo_run_id plywo_subject].freeze
       QUEUE_STAGE_SEMANTICS = {
         "queue_wait_ms" => "enqueue_to_start",
@@ -22,11 +23,15 @@ module Plywo
       end
 
       def serialize
-        super.merge(CONTEXT_KEY => plywo_execution_context)
+        payload = super.merge(CONTEXT_KEY => plywo_execution_context)
+        timing_context = plywo_queue_timing_context
+        payload[QUEUE_TIMING_KEY] = timing_context if timing_context.present?
+        payload
       end
 
       def deserialize(job_data)
         @plywo_execution_context = normalize_plywo_execution_context(job_data[CONTEXT_KEY])
+        @plywo_queue_timing_context = normalize_plywo_queue_timing_context(job_data[QUEUE_TIMING_KEY])
         super
       end
 
@@ -39,16 +44,30 @@ module Plywo
         end
       end
 
+      def plywo_queue_timing_context
+        return @plywo_queue_timing_context if defined?(@plywo_queue_timing_context) && @plywo_queue_timing_context.present?
+        return {} if plywo_execution_context["plywo_execution_id"].blank?
+
+        @plywo_queue_timing_context = QueueTimingContext.capture(self)
+      end
+
       def normalize_plywo_execution_context(context)
         return {} unless context.respond_to?(:to_h)
 
         context.to_h.slice(*CONTEXT_ATTRIBUTES).transform_keys(&:to_s)
       end
 
+      def normalize_plywo_queue_timing_context(context)
+        return {} unless context.respond_to?(:to_h)
+
+        context.to_h.transform_keys(&:to_s)
+      end
+
       def register_plywo_work_item
         context = plywo_execution_context
         return if context["plywo_execution_id"].blank?
 
+        @plywo_queue_timing_context = QueueTimingContext.capture(self)
         ExecutionWorkLifecycle.enqueued(self, context:)
       end
 
@@ -63,8 +82,8 @@ module Plywo
         execution_id = Current.plywo_execution_id
         return yield if execution_id.nil?
 
-        work_item = ExecutionWorkLifecycle.running(self)
-        record_plywo_queue_stages(work_item)
+        ExecutionWorkLifecycle.running(self)
+        record_plywo_queue_stages
         result = DurableEvidenceBuffer.capture(
           execution_id:,
           producer_kind: "active_job",
@@ -78,11 +97,13 @@ module Plywo
         raise
       end
 
-      def record_plywo_queue_stages(work_item)
+      def record_plywo_queue_stages
+        measurement = QueueTimingContext.measure(@plywo_queue_timing_context)
+        return unless measurement
+
         timing = QueueStageTiming.call(
-          enqueued_at: work_item&.enqueued_at,
-          started_at: work_item&.started_at,
-          scheduled_at:
+          queue_wait_ms: measurement.fetch("queue_wait_ms"),
+          scheduled_delay_ms: measurement.fetch("scheduled_delay_ms")
         )
 
         timing.each do |signal, value|
@@ -95,7 +116,11 @@ module Plywo
             producer_kind: "active_job",
             producer_name: self.class.name,
             producer_id: job_id,
-            attributes: { semantics: QUEUE_STAGE_SEMANTICS.fetch(signal) }
+            attributes: {
+              semantics: QUEUE_STAGE_SEMANTICS.fetch(signal),
+              timing_authority: measurement.fetch("timing_authority"),
+              clock_domain_id: measurement.fetch("clock_domain_id")
+            }
           )
         end
       end

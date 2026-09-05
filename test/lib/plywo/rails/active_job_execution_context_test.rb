@@ -42,6 +42,24 @@ class PlywoRailsActiveJobExecutionContextTest < ActiveSupport::TestCase
     )
   end
 
+  test "serializes trusted queue timing capability" do
+    serialized = with_clock_domain("boot-a") do
+      Current.set(
+        plywo_execution_id: "execution-queue-123",
+        plywo_run_id: "run-queue-456",
+        plywo_subject: "candidate"
+      ) do
+        PlywoContextProbeJob.new.serialize
+      end
+    end
+
+    timing = serialized.fetch(Plywo::Rails::ActiveJobExecutionContext::QUEUE_TIMING_KEY)
+    assert_equal 1, timing.fetch("version")
+    assert_equal "boot-a", timing.fetch("clock_domain_id")
+    assert_equal 0.0, timing.fetch("scheduled_delay_ms")
+    assert_kind_of Float, timing.fetch("enqueued_monotonic_seconds")
+  end
+
   test "restores context after a serialize deserialize boundary and attributes job evidence" do
     execution_id = "async-execution-123"
     serialized = Current.set(
@@ -78,5 +96,16 @@ class PlywoRailsActiveJobExecutionContextTest < ActiveSupport::TestCase
     assert_nil Current.plywo_execution_id
   ensure
     ActiveSupport::Notifications.unsubscribe(subscriber) if subscriber
+  end
+
+  private
+
+  def with_clock_domain(value)
+    key = Plywo::Rails::HostClockDomain::EXPLICIT_DOMAIN_ENV
+    previous = ENV[key]
+    ENV[key] = value
+    yield
+  ensure
+    previous.nil? ? ENV.delete(key) : ENV[key] = previous
   end
 end
