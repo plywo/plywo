@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 
 require "json"
-require "rack/mock"
+require "rack/mock_request"
 require "securerandom"
 
 SUBJECT_ROOT = Dir.pwd.freeze
