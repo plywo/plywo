@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 
+require "bundler"
 require "fileutils"
 require "json"
 require "open3"
@@ -54,10 +55,18 @@ module RailsSqliteSubjectProof
   end
 
   def ensure_subject_bundle(subject_root)
-    env = { "BUNDLE_GEMFILE" => subject_root.join("Gemfile").to_s }
-    return if run(%w[bundle check], chdir: subject_root, env:, allow_failure: true)
+    env = {
+      "BUNDLE_GEMFILE" => subject_root.join("Gemfile").to_s,
+      "BUNDLE_DEPLOYMENT" => "false",
+      "BUNDLE_FROZEN" => "false"
+    }
+    env["BUNDLE_PATH"] = ENV["BUNDLE_PATH"] if ENV["BUNDLE_PATH"].present?
 
-    run!(%w[bundle install --jobs 4 --retry 3], chdir: subject_root, env:)
+    Bundler.with_unbundled_env do
+      return if run(%w[bundle check], chdir: subject_root, env:, allow_failure: true)
+
+      run!(%w[bundle install --jobs 4 --retry 3], chdir: subject_root, env:)
+    end
   end
 
   def commit(subject_root, message)
