@@ -1,5 +1,5 @@
 class GithubPullRequestExecutionLeaseExpiryJob < ApplicationJob
-  queue_as :default
+  queue_as :control
 
   LEASE_ERROR_CLASS = "Plywo::Executor::LeaseExpired".freeze
   LEASE_FAILURE_PREFIX = "#{LEASE_ERROR_CLASS}:".freeze
@@ -9,7 +9,7 @@ class GithubPullRequestExecutionLeaseExpiryJob < ApplicationJob
   def perform(execution_record_id, expired_at)
     execution = PlywoExecution.find(execution_record_id)
 
-    if execution.status == "running"
+    if PlywoExecution::LEASED_STATUSES.include?(execution.status)
       return unless execution.expire_lease!(now: expired_at)
     elsif !lease_failure?(execution)
       return

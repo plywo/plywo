@@ -1,5 +1,5 @@
 class GithubCheckRunRerequestJob < ApplicationJob
-  queue_as :default
+  queue_as :control
 
   def perform(delivery_record_id)
     delivery = GithubWebhookDelivery.find(delivery_record_id)

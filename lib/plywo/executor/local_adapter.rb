@@ -10,6 +10,10 @@ module Plywo
       rescue StandardError => error
         Result.failure(error)
       end
+
+      def cancel(execution_id:, attempt_number:, reason: "control_plane_cancelled")
+        true
+      end
     end
   end
 end

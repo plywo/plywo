@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_04_214000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_05_004000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -94,6 +94,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_214000) do
     t.datetime "updated_at", null: false
     t.string "outcome"
     t.integer "attempt_count", default: 0, null: false
+    t.datetime "cancelled_at"
+    t.string "cancellation_reason"
     t.index ["execution_id"], name: "index_plywo_executions_on_execution_id", unique: true
     t.index ["outcome"], name: "index_plywo_executions_on_outcome"
     t.index ["status", "lease_expires_at"], name: "index_plywo_executions_on_status_and_lease_expires_at"
@@ -112,6 +114,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_214000) do
     t.datetime "started_at"
     t.string "status", default: "processing", null: false
     t.datetime "updated_at", null: false
+    t.datetime "cancelled_at"
+    t.string "cancellation_reason"
     t.index ["idempotency_key"], name: "index_plywo_executor_requests_on_idempotency_key", unique: true
     t.index ["status", "lease_expires_at"], name: "index_plywo_executor_requests_on_status_and_lease_expires_at"
   end

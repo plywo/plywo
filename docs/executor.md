@@ -1,6 +1,6 @@
 # Executor boundary
 
-Plywo's Rails control plane owns GitHub authentication, durable execution state, stale guards, policy, and publication. The executor owns only the act of producing behavioral evidence for one exact execution request.
+Plywo's Rails control plane owns GitHub authentication, durable execution state, stale guards, policy, cancellation authority, and publication. The executor owns only the act of producing behavioral evidence for one exact execution request.
 
 ```text
 GitHub webhook
@@ -10,6 +10,7 @@ GitHub webhook
   -> executor adapter
   -> executor result
   -> Rails stale guard
+  -> finalization fence
   -> GitHub Check + PR comment
 ```
 
@@ -53,16 +54,17 @@ Adapters consume `Plywo::Executor::Request` and return `Plywo::Executor::Result`
 
 ## Dispatch lifecycle
 
-The GitHub orchestration job claims the durable execution and performs the first exact base/head check before enqueueing `PlywoExecutorJob` with a plain request hash.
+The GitHub orchestration job claims the durable execution and performs the first exact base/head check before enqueueing `PlywoExecutorJob` with a plain request hash. It schedules the first heartbeat before executor dispatch so queue delay is inside the lease-protected lifecycle.
 
-`PlywoExecutorJob` reconstructs the request, invokes the selected adapter, and enqueues `GithubPullRequestExecutionFinalizeJob` with `Result.to_h`. If the adapter itself raises before returning a result, the job converts that transport/adapter exception into a failed portable result.
+`PlywoExecutorJob` reconstructs the request, invokes the selected adapter, and enqueues `GithubPullRequestExecutionFinalizeJob` with `Result.to_h`. If the adapter itself raises before returning a result, the job converts that transport or adapter exception into a failed portable result.
 
-The finalizer is back inside the control-plane trust boundary. It renews the still-live execution lease, refreshes GitHub state, rejects stale results, classifies the durable execution, and publishes the Check Run and PR comment.
+The finalizer is back inside the control-plane trust boundary. It renews the still-live lease, refreshes GitHub state, rejects stale results, and then atomically moves the exact running attempt to `finalizing`. That transition is the publication point of no return: cancellation can win before it, but cannot overwrite a finalizer that has already acquired the fence. Heartbeats continue while `finalizing` so a slow publication path remains leased.
 
 ```text
 GithubPullRequestExecutionJob
   -> claim attempt + lease
   -> GitHub preflight
+  -> schedule heartbeat
   -> Request.to_h
   -> PlywoExecutorJob
        -> adapter(Request)
@@ -70,19 +72,30 @@ GithubPullRequestExecutionJob
   -> GithubPullRequestExecutionFinalizeJob
        -> renew live lease
        -> GitHub stale guard
+       -> running -> finalizing fence
        -> durable outcome
        -> GitHub publication
 ```
 
 The executor job does not receive a GitHub App private key. Remote execution can receive a separate short-lived repository capability described below.
 
-## Execution leases
+## Execution leases and heartbeats
 
 A successful claim creates a lease and records `heartbeat_at` plus `lease_expires_at`. The default lease is 30 minutes and can be configured with `PLYWO_EXECUTION_LEASE_SECONDS`.
 
-A result is accepted only while the lease is still live. The finalizer renews that lease before doing network publication work. A late result cannot revive an execution whose lease has already expired.
+`GithubPullRequestExecutionHeartbeatJob` renews only an exact attempt whose status is `running` or `finalizing` and whose existing lease is still live. Each successful heartbeat schedules the next heartbeat. A previous attempt, expired attempt, cancelled execution, or other terminal execution cannot renew or reschedule.
 
-Production Solid Queue runs `GithubPullRequestExecutionLeaseReaperJob` every minute. It schedules an expiry job for overdue GitHub executions. The expiry transition is atomic: it succeeds only while the execution is still `running` and its recorded lease is still expired. A concurrent finalizer that renewed the lease therefore wins safely and prevents expiry.
+The default heartbeat cadence is one third of the execution lease. It can be configured with:
+
+```text
+PLYWO_EXECUTION_HEARTBEAT_INTERVAL_SECONDS=600
+```
+
+The interval must remain positive and shorter than `PLYWO_EXECUTION_LEASE_SECONDS`.
+
+A result is accepted only while the lease is still live. The finalizer renews that lease before doing network publication work. A late result cannot revive an execution whose lease has already expired or which has been cancelled.
+
+Production Solid Queue runs `GithubPullRequestExecutionLeaseReaperJob` every minute. It schedules an expiry job for overdue `running` or `finalizing` GitHub executions. The expiry transition is atomic: it succeeds only while the execution is still leased and its recorded lease is still expired. A concurrent heartbeat or finalizer renewal therefore wins safely and prevents expiry.
 
 An abandoned execution becomes:
 
@@ -94,11 +107,36 @@ failure = Plywo::Executor::LeaseExpired: ...
 
 The control plane then publishes the normal `INFRA_FAILURE` Check and comment. Publication is idempotent, and the expiry job can retry publication for an execution already terminal with the same lease-expiry failure.
 
+## Cancellation lifecycle
+
+Cancellation is an explicit durable outcome, not an infrastructure failure.
+
+`Plywo::Executor::Cancellation` atomically cancels only the exact current queued or running attempt. A successful cancellation records:
+
+```text
+status              = cancelled
+outcome             = cancelled
+cancelled_at         = <timestamp>
+cancellation_reason  = <reason>
+lease_expires_at     = nil
+failure              = nil
+```
+
+If work had already been dispatched, `PlywoExecutorCancellationJob` sends a cooperative cancellation request to the selected executor adapter. Delivery failure is logged but never rewrites the durable control-plane execution as `infra_failure`.
+
+The finalizer and cancellation operation are fenced against each other. Cancellation can win while the execution is `queued` or `running`. Once the finalizer atomically moves the exact attempt to `finalizing`, the result has reached the publication point of no return and cancellation is rejected for that attempt.
+
+A cancelled execution cannot publish a late behavioral result because finalization requires a live leased status and the exact finalization fence.
+
+Hard process or container termination is intentionally separate from the durable cancellation contract. The current protocol guarantees cooperative notification, durable cancellation, and rejection of late results.
+
 ## Adapters
 
 ### Local
 
 `PLYWO_EXECUTOR=local` selects the development adapter. It uses the exact-worktree + isolated PostgreSQL + Solid Queue implementation behind `Plywo::Github::LocalPullRequestRunner` and wraps either its payload or exception in `Plywo::Executor::Result`.
+
+The local adapter accepts the cancellation protocol as a no-op because hard in-process interruption is outside this slice. The control-plane cancellation fence still prevents a late local result from becoming authoritative.
 
 `PLYWO_GITHUB_EXECUTION_MODE=local` remains a temporary compatibility fallback for existing Development App setups.
 
@@ -120,7 +158,7 @@ PLYWO_REMOTE_EXECUTOR_OPEN_TIMEOUT_SECONDS=5
 PLYWO_REMOTE_EXECUTOR_READ_TIMEOUT_SECONDS=2100
 ```
 
-The adapter sends one `POST` containing `Request.to_h` JSON and expects one `Result.to_h` JSON response. Requests include:
+The adapter sends one `POST` containing `Request.to_h` JSON and expects one `Result.to_h` JSON response. Execution requests include:
 
 ```text
 Content-Type: application/json
@@ -136,9 +174,19 @@ For a durable GitHub execution, the control plane can mint a second short-lived 
 
 A non-2xx response, invalid JSON, or invalid result schema becomes a transport `INFRA_FAILURE`; a valid failed `Result` preserves the remote worker's original error class and message through finalization.
 
+Cancellation uses the same service-authentication credential but no repository capability:
+
+```text
+POST /v1/executions/:execution_id/attempts/:attempt_number/cancel
+Content-Type: application/json
+Authorization: Bearer <executor service token>
+
+{"reason":"..."}
+```
+
 ## Executor service role
 
-The same codebase can now be deployed in a separate executor-service role. The endpoint is mounted only when:
+The same codebase can be deployed in a separate executor-service role. The endpoints are mounted only when:
 
 ```text
 PLYWO_EXECUTOR_SERVICE=1
@@ -148,6 +196,7 @@ The service accepts:
 
 ```text
 POST /v1/executions
+POST /v1/executions/:execution_id/attempts/:attempt_number/cancel
 ```
 
 and requires a dedicated bearer token:
@@ -170,9 +219,9 @@ PLYWO_EXECUTOR_SERVICE_ADAPTER=git_clone
 
 This separation is intentional. A service deployment must not set `PLYWO_EXECUTOR=remote` and recursively call itself. It must not receive the GitHub App private key or webhook secret. The only GitHub credential it may receive is the per-execution, repository-scoped, contents-read clone capability.
 
-### Durable transport idempotency
+### Durable transport idempotency and cancellation
 
-Every executor service request is stored in `plywo_executor_requests`, keyed uniquely by the HTTP `Idempotency-Key`. The ledger stores only the portable request, its digest, the portable result, and service-side claim metadata. It does not store either bearer token or the repository capability.
+Every executor service request is stored in `plywo_executor_requests`, keyed uniquely by the HTTP `Idempotency-Key`. The ledger stores only the portable request, its digest, the portable result, service-side claim metadata, and cancellation metadata. It does not store either bearer token or the repository capability.
 
 For the same idempotency key:
 
@@ -181,6 +230,13 @@ For the same idempotency key:
 - reuse with different request content is rejected
 - an abandoned processing request can be reclaimed after its service-side claim lease expires
 - a stale worker claim cannot overwrite the result after another worker has reclaimed the request
+- cancellation is idempotent
+- cancellation can be recorded before the execution request arrives
+- a cancelled idempotency key cannot start work
+- a worker result that races after cancellation cannot complete the cancelled claim
+- a completed result cannot be replaced retroactively by cancellation
+
+Cancellation and request acquisition use the same unique idempotency key as their race fence. If cancellation creates the durable record first, later request acquisition observes `cancelled` instead of executing. If execution creates the processing claim first, cancellation atomically moves it to `cancelled` and clears the claim token. Only one of completion and cancellation can win the conditional database transition.
 
 Request digests canonicalize nested hash key ordering before hashing, so semantically identical JSON objects do not conflict only because their keys were reordered.
 
@@ -214,9 +270,10 @@ The executor can report observations and execution failures. It does not decide 
 
 - exact recorded base/head identity
 - stale checks before dispatch and finalization
-- execution lease ownership and expiry
+- execution lease ownership, heartbeat, and expiry
+- cancellation authority and finalization fencing
 - behavioral outcome classification
-- `INFRA_FAILURE` versus product regression
+- `INFRA_FAILURE` versus product regression versus cancellation
 - retry eligibility and attempt counting
 - GitHub publication
 - minting the short-lived repository capability
@@ -225,7 +282,7 @@ The executor service role owns only:
 
 - authenticating the control-plane service credential
 - consuming the short-lived clone capability for repository access
-- durable idempotency for one execution attempt
+- durable idempotency and cancellation fencing for one execution attempt
 - acquiring a service-side worker claim
 - producing `Plywo::Executor::Result`
 
@@ -233,12 +290,13 @@ This keeps an executor replaceable: local process, container, VM, Kubernetes job
 
 ## Remaining remote-runtime boundaries
 
-Repository authorization now has an explicit out-of-band capability boundary, but production remote execution is not complete. The important remaining boundaries are:
+Repository authorization, control-plane heartbeats, finalization fencing, and cooperative cancellation now have explicit contracts. The important remaining boundaries are:
 
-1. heartbeat/cancellation for long-running remote work so useful work can renew the control-plane lease without database access
-2. generalized subject instrumentation so an arbitrary customer repository does not need Plywo's dogfood files committed into it
-3. fork pull requests, which require an explicit multi-repository capability model rather than reusing the base-repository capability
-4. deployment isolation proving the executor role actually runs without the GitHub App private key or webhook secret
-5. a real control-plane -> executor-service E2E on separate processes/hosts using the `git_clone` adapter
+1. worker-host progress/heartbeat transport independent of the control-plane queue
+2. hard worker/container termination after cooperative cancellation
+3. generalized subject instrumentation so an arbitrary customer repository does not need Plywo's dogfood files committed into it
+4. fork pull requests, which require an explicit multi-repository capability model rather than reusing the base-repository capability
+5. deployment isolation proving the executor role actually runs without the GitHub App private key or webhook secret
+6. a real control-plane -> executor-service E2E on separate processes or hosts using the `git_clone` adapter
 
 The live Development App infra-failure Re-run proof was completed in #35.

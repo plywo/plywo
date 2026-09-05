@@ -108,6 +108,42 @@ class PlywoExecutorServiceTest < ActiveSupport::TestCase
     end
   end
 
+  test "cancellation before request arrival prevents worker execution" do
+    adapter = counting_adapter(Plywo::Executor::Result.success(result_payload))
+    service = service(adapter:)
+
+    cancellation = service.cancel(idempotency_key: "github-123:1", reason: "superseded")
+
+    assert_equal :cancelled, cancellation.state
+    error = assert_raises(Plywo::Executor::Service::RequestCancelled) do
+      service.call(idempotency_key: "github-123:1", request_payload: request_payload)
+    end
+    assert_equal "Executor request was cancelled", error.message
+    assert_equal 0, adapter.calls
+  end
+
+  test "cancellation during worker execution rejects the late result" do
+    adapter = Object.new
+    adapter.define_singleton_method(:call) do |request:, repository_capability: nil|
+      raise "unexpected capability" if repository_capability
+
+      PlywoExecutorRequest.cancel!(
+        idempotency_key: "#{request.execution_id}:#{request.attempt_number}",
+        reason: "control_plane_cancelled"
+      )
+      Plywo::Executor::Result.success({ "late" => true })
+    end
+
+    error = assert_raises(Plywo::Executor::Service::RequestCancelled) do
+      service(adapter:).call(idempotency_key: "github-123:1", request_payload: request_payload)
+    end
+
+    assert_equal "Executor request was cancelled", error.message
+    record = PlywoExecutorRequest.find_by!(idempotency_key: "github-123:1")
+    assert_equal "cancelled", record.status
+    assert_equal({}, record.result)
+  end
+
   private
 
   def service(adapter:)

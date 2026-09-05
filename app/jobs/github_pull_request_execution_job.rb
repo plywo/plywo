@@ -1,5 +1,5 @@
 class GithubPullRequestExecutionJob < ApplicationJob
-  queue_as :default
+  queue_as :control
 
   def perform(execution_record_id)
     execution = PlywoExecution.find(execution_record_id)
@@ -13,6 +13,7 @@ class GithubPullRequestExecutionJob < ApplicationJob
     end
 
     request = Plywo::Executor::Request.from_execution(execution)
+    heartbeat_job_class.schedule(execution.execution_id, execution.attempt_count)
     executor_job_class.perform_later(request.to_h)
 
     Rails.logger.info(
@@ -22,8 +23,7 @@ class GithubPullRequestExecutionJob < ApplicationJob
       "attempt=#{execution.attempt_count.inspect}"
     )
   rescue StandardError => error
-    if execution
-      execution.fail!(error)
+    if execution&.fail!(error)
       publish_infra_failure(execution:, error:)
     end
     raise
@@ -86,6 +86,10 @@ class GithubPullRequestExecutionJob < ApplicationJob
 
   def executor_job_class
     PlywoExecutorJob
+  end
+
+  def heartbeat_job_class
+    GithubPullRequestExecutionHeartbeatJob
   end
 
   def execution_publisher(token:)

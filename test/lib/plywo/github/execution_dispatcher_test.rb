@@ -16,6 +16,44 @@ class PlywoGithubExecutionDispatcherTest < ActiveSupport::TestCase
     assert_match(/\Agithub-[0-9a-f]{64}\z/, first.execution_id)
   end
 
+  test "cancels an older active revision of the same pull request" do
+    notification_job = recording_notification_job
+    cancellation = Plywo::Executor::Cancellation.new(notification_job:)
+    dispatcher = Plywo::Github::ExecutionDispatcher.new(
+      scenario_id: "scenario",
+      cancellation:
+    )
+    delivery = create_delivery
+    first, = dispatcher.call(delivery:, pull_request: pull_request_payload)
+    first.claim!
+
+    newer_pull_request = pull_request_payload.deep_dup
+    newer_pull_request["head"]["sha"] = "new-head-sha"
+    newer, enqueue = dispatcher.call(delivery:, pull_request: newer_pull_request)
+
+    assert enqueue
+    refute_equal first.id, newer.id
+    first.reload
+    assert_equal "cancelled", first.status
+    assert_equal "cancelled", first.outcome
+    assert_equal "superseded_by_new_pull_request_revision", first.cancellation_reason
+    assert_equal [ [ first.execution_id, 1, "superseded_by_new_pull_request_revision" ] ], notification_job.calls
+    assert_equal "queued", newer.status
+  end
+
+  test "does not cancel an active execution from another pull request" do
+    dispatcher = Plywo::Github::ExecutionDispatcher.new(scenario_id: "scenario")
+    other_delivery = create_delivery(pull_request_number: 99)
+    other, = dispatcher.call(delivery: other_delivery, pull_request: pull_request_payload)
+    other.claim!
+
+    dispatcher.call(delivery: create_delivery, pull_request: pull_request_payload.merge(
+      "head" => pull_request_payload.fetch("head").merge("sha" => "new-head-sha")
+    ))
+
+    assert_equal "running", other.reload.status
+  end
+
   test "does not re-enqueue a completed execution for the same identity" do
     delivery = create_delivery
     dispatcher = Plywo::Github::ExecutionDispatcher.new(scenario_id: "scenario")
@@ -61,14 +99,14 @@ class PlywoGithubExecutionDispatcherTest < ActiveSupport::TestCase
 
   private
 
-  def create_delivery
+  def create_delivery(pull_request_number: 31)
     GithubWebhookDelivery.create!(
       delivery_id: "delivery-#{SecureRandom.hex(4)}",
       event: "pull_request",
       action: "synchronize",
       installation_id: 123,
       repository: "plywo/plywo",
-      pull_request_number: 31,
+      pull_request_number:,
       base_sha: "old-base",
       head_sha: "head-sha"
     )
@@ -83,5 +121,13 @@ class PlywoGithubExecutionDispatcherTest < ActiveSupport::TestCase
         "repo" => { "full_name" => "plywo/plywo" }
       }
     }
+  end
+
+  def recording_notification_job
+    Struct.new(:calls) do
+      def perform_later(*arguments)
+        calls << arguments
+      end
+    end.new([])
   end
 end

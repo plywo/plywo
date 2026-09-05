@@ -65,6 +65,68 @@ class PlywoExecutorRequestTest < ActiveSupport::TestCase
     )
   end
 
+  test "cancels an active claim and prevents its late result from completing" do
+    now = Time.utc(2026, 9, 5, 0, 50, 0)
+    first = acquire(now:)
+
+    cancellation = PlywoExecutorRequest.cancel!(
+      idempotency_key: "execution:1",
+      reason: "control_plane_cancelled",
+      now: now + 10
+    )
+
+    assert_equal :cancelled, cancellation.state
+    assert_equal "cancelled", cancellation.record.status
+    assert_equal "control_plane_cancelled", cancellation.record.cancellation_reason
+    assert_equal now + 10, cancellation.record.cancelled_at
+    assert_nil cancellation.record.claim_token
+    assert_nil cancellation.record.lease_expires_at
+    refute first.record.complete_claim!(
+      claim_token: first.claim_token,
+      result_payload: Plywo::Executor::Result.success({}).to_h,
+      now: now + 11
+    )
+
+    duplicate = acquire(now: now + 12)
+    assert_equal :cancelled, duplicate.state
+    assert_nil duplicate.claim_token
+  end
+
+  test "records cancellation before work arrives so later acquisition cannot start" do
+    now = Time.utc(2026, 9, 5, 0, 50, 0)
+
+    cancellation = PlywoExecutorRequest.cancel!(
+      idempotency_key: "execution:1",
+      reason: "superseded",
+      now:
+    )
+    acquisition = acquire(now: now + 1)
+
+    assert_equal :cancelled, cancellation.state
+    assert_equal :cancelled, acquisition.state
+    assert_equal PlywoExecutorRequest::CANCELLED_BEFORE_REQUEST_DIGEST, acquisition.record.request_digest
+    assert_equal({}, acquisition.record.request_payload)
+    assert_equal "superseded", acquisition.record.cancellation_reason
+  end
+
+  test "does not cancel a completed request" do
+    now = Time.utc(2026, 9, 5, 0, 50, 0)
+    first = acquire(now:)
+    first.record.complete_claim!(
+      claim_token: first.claim_token,
+      result_payload: Plywo::Executor::Result.success({}).to_h,
+      now: now + 1
+    )
+
+    cancellation = PlywoExecutorRequest.cancel!(
+      idempotency_key: "execution:1",
+      now: now + 2
+    )
+
+    assert_equal :completed, cancellation.state
+    assert_equal "completed", cancellation.record.status
+  end
+
   test "rejects reuse of an idempotency key for different request content" do
     now = Time.utc(2026, 9, 4, 21, 40, 0)
     acquire(now:)
