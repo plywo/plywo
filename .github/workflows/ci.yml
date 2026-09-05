@@ -72,6 +72,9 @@ jobs:
           PLYWO_OUTPUT: tmp/plywo-dogfood.json
         run: bin/rails plywo:dogfood
 
+      - name: Prove Rails SQLite customer subject
+        run: ruby script/prove_rails_sqlite_subject.rb
+
       - name: Prepare real Git subjects
         if: github.event_name == 'pull_request'
         run: |
