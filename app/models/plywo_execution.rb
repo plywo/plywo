@@ -17,7 +17,8 @@ class PlywoExecution < ApplicationRecord
     Integer(ENV.fetch("PLYWO_EXECUTION_LEASE_SECONDS", DEFAULT_LEASE_SECONDS))
   end
 
-  def claim!(now: Time.current, lease_seconds: self.class.lease_seconds)
+  def claim!(now: nil, lease_seconds: self.class.lease_seconds)
+    now = authoritative_now(now)
     claimed = self.class.where(id:, status: "queued").update_all(
       status: "running",
       started_at: now,
@@ -36,7 +37,8 @@ class PlywoExecution < ApplicationRecord
     claimed == 1
   end
 
-  def renew_lease!(now: Time.current, lease_seconds: self.class.lease_seconds)
+  def renew_lease!(now: nil, lease_seconds: self.class.lease_seconds)
+    now = authoritative_now(now)
     renewed = self.class
       .where(id:, status: LEASED_STATUSES)
       .where("lease_expires_at > ?", now)
@@ -50,11 +52,13 @@ class PlywoExecution < ApplicationRecord
     renewed == 1
   end
 
-  def lease_expired?(at: Time.current)
+  def lease_expired?(at: nil)
+    at = authoritative_now(at)
     LEASED_STATUSES.include?(status) && lease_expires_at.present? && lease_expires_at <= at
   end
 
-  def expire_lease!(now: Time.current)
+  def expire_lease!(now: nil)
+    now = authoritative_now(now)
     expired = self.class
       .where(id:, status: LEASED_STATUSES)
       .where("lease_expires_at <= ?", now)
@@ -71,7 +75,8 @@ class PlywoExecution < ApplicationRecord
     expired == 1
   end
 
-  def begin_finalization!(attempt_number:, now: Time.current)
+  def begin_finalization!(attempt_number:, now: nil)
+    now = authoritative_now(now)
     finalizing = self.class
       .where(id:, status: "running", attempt_count: Integer(attempt_number))
       .where("lease_expires_at > ?", now)
@@ -81,7 +86,8 @@ class PlywoExecution < ApplicationRecord
     finalizing == 1
   end
 
-  def cancel!(attempt_number: nil, reason: "cancelled", now: Time.current)
+  def cancel!(attempt_number: nil, reason: "cancelled", now: nil)
+    now = authoritative_now(now)
     scope = self.class.where(id:, status: CANCELLABLE_STATUSES)
     scope = scope.where(attempt_count: Integer(attempt_number)) unless attempt_number.nil?
 
@@ -102,7 +108,8 @@ class PlywoExecution < ApplicationRecord
     cancelled == 1
   end
 
-  def complete!(payload = nil, now: Time.current, **keyword_payload)
+  def complete!(payload = nil, now: nil, **keyword_payload)
+    now = authoritative_now(now)
     payload ||= keyword_payload
     decision = payload.dig("result", "decision")
     completed = self.class.where(id:, status: LEASED_STATUSES).update_all(
@@ -120,7 +127,8 @@ class PlywoExecution < ApplicationRecord
     completed == 1
   end
 
-  def ignore!(reason, now: Time.current)
+  def ignore!(reason, now: nil)
+    now = authoritative_now(now)
     reason = reason.to_s
     outcome = reason.start_with?("stale") ? "stale" : "manual_review_required"
     ignored = self.class.where(id:, status: IGNORABLE_STATUSES).update_all(
@@ -136,11 +144,12 @@ class PlywoExecution < ApplicationRecord
     ignored == 1
   end
 
-  def fail!(error, now: Time.current)
+  def fail!(error, now: nil)
     fail_details!(error_class: error.class.to_s, error_message: error.message, now:)
   end
 
-  def fail_details!(error_class:, error_message:, now: Time.current)
+  def fail_details!(error_class:, error_message:, now: nil)
+    now = authoritative_now(now)
     message = "#{error_class}: #{error_message}".truncate(2_000)
     failed = self.class.where(id:, status: ACTIVE_STATUSES).update_all(
       status: "failed",
@@ -159,7 +168,8 @@ class PlywoExecution < ApplicationRecord
     status == "failed" && outcome == "infra_failure"
   end
 
-  def requeue!
+  def requeue!(now: nil)
+    now = authoritative_now(now)
     requeued = self.class.where(id:, status: "failed", outcome: "infra_failure").update_all(
       status: "queued",
       outcome: nil,
@@ -172,7 +182,7 @@ class PlywoExecution < ApplicationRecord
       heartbeat_at: nil,
       lease_expires_at: nil,
       finished_at: nil,
-      updated_at: Time.current
+      updated_at: now
     )
 
     reload if requeued == 1
@@ -180,6 +190,10 @@ class PlywoExecution < ApplicationRecord
   end
 
   private
+
+  def authoritative_now(explicit_now)
+    explicit_now || Plywo::ClockAuthority.database_now(connection: self.class.connection)
+  end
 
   def behavioral_outcome(payload)
     recommendation = payload.dig("result", "merge_recommendation") || payload.dig("result", "decision")
