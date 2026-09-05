@@ -5,8 +5,13 @@ require "socket"
 module Plywo
   module Rails
     class HostClockDomain
+      EXPLICIT_DOMAIN_ENV = "PLYWO_MONOTONIC_CLOCK_DOMAIN_ID".freeze
+
       class << self
         def id
+          explicit = ENV[EXPLICIT_DOMAIN_ENV].to_s.strip
+          return explicit unless explicit.empty?
+
           @id ||= build_id
         end
 
