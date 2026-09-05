@@ -61,6 +61,8 @@ different or unknown clock domain
 
 This deliberately prefers missing evidence over fabricated cross-host precision. A future queue adapter may replace this fallback with backend-owned timing when it can prove that both boundaries share one trustworthy authority.
 
+`PLYWO_MONOTONIC_CLOCK_DOMAIN_ID` is an internal runtime capability override. Set it only when the runtime or scheduler can guarantee that the participating processes really share one monotonic clock domain. Never set it merely to force cross-host queue timing to become available.
+
 `PlywoExecutionWorkItem.enqueued_at`, `started_at`, and `finished_at` remain lifecycle/audit fields for work tracking and quiescence. Behavioral queue-stage metrics must not be derived by subtracting those host wall-clock timestamps.
 
 ## Customer runtime evidence
