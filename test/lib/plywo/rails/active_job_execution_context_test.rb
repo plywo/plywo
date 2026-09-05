@@ -42,17 +42,14 @@ class PlywoRailsActiveJobExecutionContextTest < ActiveSupport::TestCase
     )
   end
 
-  test "serializes trusted queue timing capability after enqueue registration" do
-    job = PlywoContextProbeJob.new
-
-    serialized = Plywo::Rails::HostClockDomain.stub(:id, "boot-a") do
+  test "serializes trusted queue timing capability" do
+    serialized = with_clock_domain("boot-a") do
       Current.set(
         plywo_execution_id: "execution-queue-123",
         plywo_run_id: "run-queue-456",
         plywo_subject: "candidate"
       ) do
-        job.send(:register_plywo_work_item)
-        job.serialize
+        PlywoContextProbeJob.new.serialize
       end
     end
 
@@ -99,5 +96,16 @@ class PlywoRailsActiveJobExecutionContextTest < ActiveSupport::TestCase
     assert_nil Current.plywo_execution_id
   ensure
     ActiveSupport::Notifications.unsubscribe(subscriber) if subscriber
+  end
+
+  private
+
+  def with_clock_domain(value)
+    key = Plywo::Rails::HostClockDomain::EXPLICIT_DOMAIN_ENV
+    previous = ENV[key]
+    ENV[key] = value
+    yield
+  ensure
+    previous.nil? ? ENV.delete(key) : ENV[key] = previous
   end
 end
