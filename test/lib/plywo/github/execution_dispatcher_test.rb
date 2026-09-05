@@ -44,7 +44,7 @@ class PlywoGithubExecutionDispatcherTest < ActiveSupport::TestCase
   test "does not cancel an active execution from another pull request" do
     dispatcher = Plywo::Github::ExecutionDispatcher.new(scenario_id: "scenario")
     other_delivery = create_delivery(pull_request_number: 99)
-    other, = dispatcher.call(other_delivery, pull_request: pull_request_payload)
+    other, = dispatcher.call(delivery: other_delivery, pull_request: pull_request_payload)
     other.claim!
 
     dispatcher.call(delivery: create_delivery, pull_request: pull_request_payload.merge(
