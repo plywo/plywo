@@ -26,7 +26,6 @@ module Plywo
       def env_for(root:, execution:, role:)
         {
           "BUNDLE_GEMFILE" => root.join("Gemfile").to_s,
-          "BUNDLE_FORCE_RUBY_PLATFORM" => "true",
           "RAILS_ENV" => "test",
           "PLYWO_SQLITE_DATABASE" => database_path(root:, execution:, role:).to_s,
           "PLYWO_ASYNC_TRANSPORT" => "test_adapter",
