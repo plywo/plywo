@@ -264,7 +264,7 @@ find_named_tunnel_id() {
 }
 
 prompt_public_hostname() {
-  local example hostname
+  local example value
   case "$ENVIRONMENT" in
     development) example="github-dev.example.com" ;;
     staging) example="github-staging.example.com" ;;
@@ -272,11 +272,16 @@ prompt_public_hostname() {
   esac
 
   [[ -t 0 ]] || die "Set PLYWO_PUBLIC_URL=https://your-hostname and rerun"
-  printf '\nEnter the stable Cloudflare hostname for %s\n' "$APP_NAME"
-  printf 'Example: %s\n' "$example"
-  read -r -p 'Hostname: ' hostname
-  [[ -n "$hostname" ]] || die "A hostname is required"
-  printf 'https://%s' "$hostname"
+  printf '\nEnter the stable Cloudflare hostname or HTTPS URL for %s\n' "$APP_NAME"
+  printf 'Examples: %s or https://%s\n' "$example" "$example"
+  read -r -p 'Hostname or HTTPS URL: ' value
+  [[ -n "$value" ]] || die "A hostname or HTTPS URL is required"
+
+  case "$value" in
+    https://*) printf '%s' "$value" ;;
+    *://*) die "Public URL must use https://" ;;
+    *) printf 'https://%s' "$value" ;;
+  esac
 }
 
 start_local_named_tunnel() {
