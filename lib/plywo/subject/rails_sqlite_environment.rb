@@ -4,9 +4,11 @@ require "rbconfig"
 module Plywo
   module Subject
     class RailsSqliteEnvironment < Environment
-      def initialize(command_runner:, state_root: nil)
+      def initialize(command_runner:, state_root: nil, bundle_path: nil, bundle_app_config: nil)
         @command_runner = command_runner
         @state_root = state_root && Pathname(state_root).expand_path
+        @bundle_path = bundle_path && Pathname(bundle_path).expand_path.to_s
+        @bundle_app_config = bundle_app_config && Pathname(bundle_app_config).expand_path.to_s
       end
 
       def prepare(root:, execution:, role:)
@@ -24,7 +26,7 @@ module Plywo
       end
 
       def env_for(root:, execution:, role:)
-        {
+        env = {
           "BUNDLE_GEMFILE" => root.join("Gemfile").to_s,
           "DATABASE_URL" => nil,
           "SOLID_QUEUE_DATABASE_URL" => nil,
@@ -34,6 +36,9 @@ module Plywo
           "PLYWO_QUIESCENCE_TIMEOUT_SECONDS" => "30",
           "PLYWO_QUIET_PERIOD_SECONDS" => "0.01"
         }
+        env["BUNDLE_PATH"] = @bundle_path if @bundle_path
+        env["BUNDLE_APP_CONFIG"] = @bundle_app_config if @bundle_app_config
+        env
       end
 
       def cleanup(root:, execution:, role:)
