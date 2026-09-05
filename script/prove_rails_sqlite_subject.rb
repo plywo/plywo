@@ -1,8 +1,6 @@
 #!/usr/bin/env ruby
 
-require "bundler"
 require "fileutils"
-require "json"
 require "open3"
 require "pathname"
 require "tmpdir"
