@@ -1,5 +1,5 @@
 class GithubPullRequestExecutionFinalizeJob < ApplicationJob
-  queue_as :default
+  queue_as :control
 
   def perform(execution_id, result_payload)
     execution = PlywoExecution.find_by!(execution_id:)
