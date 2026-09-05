@@ -75,7 +75,7 @@ jobs:
       - name: Prove Rails SQLite customer subject
         env:
           BUNDLE_PATH: ${{ github.workspace }}/vendor/bundle
-        run: bundle exec ruby script/prove_rails_sqlite_subject.rb
+        run: ruby script/prove_rails_sqlite_subject.rb
 
       - name: Prepare real Git subjects
         if: github.event_name == 'pull_request'
