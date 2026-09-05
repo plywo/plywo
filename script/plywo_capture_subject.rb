@@ -1,12 +1,12 @@
 #!/usr/bin/env ruby
 
 require "json"
-require "rack/mock_request"
 require "securerandom"
 
 SUBJECT_ROOT = Dir.pwd.freeze
 
 require File.join(SUBJECT_ROOT, "config/environment")
+require "rack/mock_request"
 
 unless defined?(Plywo::Rails::ExecutionQuiescence)
   require File.join(SUBJECT_ROOT, "lib/plywo/rails/execution_quiescence")
