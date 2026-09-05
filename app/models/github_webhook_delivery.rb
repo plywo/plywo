@@ -14,29 +14,30 @@ class GithubWebhookDelivery < ApplicationRecord
     pull_request? && action.in?(RUNNABLE_PULL_REQUEST_ACTIONS)
   end
 
-  def claim!
+  def claim!(now: nil)
+    now ||= Plywo::ClockAuthority.database_now
     claimed = self.class.where(id:, status: "accepted").update_all(
       status: "processing",
-      started_at: Time.current,
+      started_at: now,
       finished_at: nil,
       failure: nil,
-      updated_at: Time.current
+      updated_at: now
     )
 
     reload if claimed == 1
     claimed == 1
   end
 
-  def complete!
-    update!(status: "completed", finished_at: Time.current, failure: nil)
+  def complete!(now: nil)
+    update!(status: "completed", finished_at: now || Plywo::ClockAuthority.database_now, failure: nil)
   end
 
-  def ignore!(reason)
-    update!(status: "ignored", finished_at: Time.current, failure: reason.to_s)
+  def ignore!(reason, now: nil)
+    update!(status: "ignored", finished_at: now || Plywo::ClockAuthority.database_now, failure: reason.to_s)
   end
 
-  def fail!(error)
+  def fail!(error, now: nil)
     message = "#{error.class}: #{error.message}".truncate(2_000)
-    update!(status: "failed", failure: message, finished_at: Time.current)
+    update!(status: "failed", failure: message, finished_at: now || Plywo::ClockAuthority.database_now)
   end
 end
