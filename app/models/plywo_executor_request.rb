@@ -15,30 +15,32 @@ class PlywoExecutorRequest < ApplicationRecord
   validates :idempotency_key, uniqueness: true
   validates :status, inclusion: { in: STATUSES }
 
-  def self.acquire!(idempotency_key:, request_payload:, now: Time.current, lease_seconds: DEFAULT_LEASE_SECONDS)
+  def self.acquire!(idempotency_key:, request_payload:, now: nil, lease_seconds: DEFAULT_LEASE_SECONDS)
     lease_seconds = Integer(lease_seconds)
     raise ArgumentError, "Executor request lease must be positive" unless lease_seconds.positive?
 
     request_digest = digest_for(request_payload)
 
     loop do
+      current_now = authoritative_now(now)
+
       if (record = find_by(idempotency_key:))
         return Acquisition.new(state: :cancelled, record:, claim_token: nil) if record.status == "cancelled"
         raise DigestMismatch, "Idempotency key was reused for a different executor request" if record.request_digest != request_digest
         return Acquisition.new(state: :completed, record:, claim_token: nil) if record.status == "completed"
 
-        if record.lease_expires_at && record.lease_expires_at > now
+        if record.lease_expires_at && record.lease_expires_at > current_now
           return Acquisition.new(state: :in_progress, record:, claim_token: nil)
         end
 
         claim_token = SecureRandom.uuid
         claimed = where(id: record.id, status: "processing")
-          .where("lease_expires_at IS NULL OR lease_expires_at <= ?", now)
+          .where("lease_expires_at IS NULL OR lease_expires_at <= ?", current_now)
           .update_all(
             claim_token:,
-            started_at: now,
-            lease_expires_at: now + lease_seconds.seconds,
-            updated_at: now
+            started_at: current_now,
+            lease_expires_at: current_now + lease_seconds.seconds,
+            updated_at: current_now
           )
 
         if claimed == 1
@@ -58,8 +60,8 @@ class PlywoExecutorRequest < ApplicationRecord
           claim_token:,
           request_payload:,
           result: {},
-          started_at: now,
-          lease_expires_at: now + lease_seconds.seconds
+          started_at: current_now,
+          lease_expires_at: current_now + lease_seconds.seconds
         )
         return Acquisition.new(state: :execute, record:, claim_token:)
       rescue ActiveRecord::RecordNotUnique
@@ -68,8 +70,10 @@ class PlywoExecutorRequest < ApplicationRecord
     end
   end
 
-  def self.cancel!(idempotency_key:, reason: "cancelled", now: Time.current)
+  def self.cancel!(idempotency_key:, reason: "cancelled", now: nil)
     loop do
+      current_now = authoritative_now(now)
+
       if (record = find_by(idempotency_key:))
         return Cancellation.new(state: :completed, record:) if record.status == "completed"
         return Cancellation.new(state: :cancelled, record:) if record.status == "cancelled"
@@ -79,9 +83,9 @@ class PlywoExecutorRequest < ApplicationRecord
           claim_token: nil,
           lease_expires_at: nil,
           cancellation_reason: reason.to_s,
-          cancelled_at: now,
-          finished_at: now,
-          updated_at: now
+          cancelled_at: current_now,
+          finished_at: current_now,
+          updated_at: current_now
         )
         next unless cancelled == 1
 
@@ -98,8 +102,8 @@ class PlywoExecutorRequest < ApplicationRecord
           request_payload: {},
           result: {},
           cancellation_reason: reason.to_s,
-          cancelled_at: now,
-          finished_at: now,
+          cancelled_at: current_now,
+          finished_at: current_now,
           lease_expires_at: nil
         )
         return Cancellation.new(state: :cancelled, record:)
@@ -109,7 +113,8 @@ class PlywoExecutorRequest < ApplicationRecord
     end
   end
 
-  def complete_claim!(claim_token:, result_payload:, now: Time.current)
+  def complete_claim!(claim_token:, result_payload:, now: nil)
+    now = self.class.authoritative_now(now)
     completed = self.class.where(id:, status: "processing", claim_token:)
       .where("lease_expires_at > ?", now)
       .update_all(
@@ -127,6 +132,10 @@ class PlywoExecutorRequest < ApplicationRecord
 
   def self.digest_for(payload)
     Digest::SHA256.hexdigest(JSON.generate(canonicalize(payload)))
+  end
+
+  def self.authoritative_now(explicit_now)
+    explicit_now || Plywo::ClockAuthority.database_now(connection: connection)
   end
 
   def self.canonicalize(value)

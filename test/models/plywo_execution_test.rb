@@ -14,6 +14,31 @@ class PlywoExecutionTest < ActiveSupport::TestCase
     refute execution.claim!(now: now + 1, lease_seconds: 120)
   end
 
+  test "uses database-authoritative time instead of host wall clock by default" do
+    execution = create_execution
+    database_now = Time.utc(2026, 9, 5, 0, 40, 0)
+
+    with_database_clock(database_now) do
+      travel_to(database_now + 12.hours) do
+        assert execution.claim!(lease_seconds: 120)
+        assert_equal database_now, execution.started_at
+        assert_equal database_now, execution.heartbeat_at
+        assert_equal database_now + 120, execution.lease_expires_at
+        refute execution.lease_expired?
+      end
+    end
+
+    with_database_clock(database_now + 121) do
+      travel_to(database_now - 12.hours) do
+        assert execution.lease_expired?
+        assert execution.expire_lease!
+      end
+    end
+
+    assert_equal "failed", execution.status
+    assert_equal "infra_failure", execution.outcome
+  end
+
   test "renews only a live leased execution" do
     execution = create_execution
     now = Time.utc(2026, 9, 4, 20, 0, 0)
