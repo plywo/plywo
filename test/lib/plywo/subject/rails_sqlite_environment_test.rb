@@ -31,10 +31,10 @@ class PlywoSubjectRailsSqliteEnvironmentTest < ActiveSupport::TestCase
 
       assert_equal File.join(directory, "plywo_subject_abcdef123456_base.sqlite3"), env.fetch("PLYWO_SQLITE_DATABASE")
       assert_equal root.join("Gemfile").to_s, env.fetch("BUNDLE_GEMFILE")
+      assert_nil env.fetch("DATABASE_URL")
+      assert_nil env.fetch("SOLID_QUEUE_DATABASE_URL")
       assert_equal "test", env.fetch("RAILS_ENV")
       assert_equal "test_adapter", env.fetch("PLYWO_ASYNC_TRANSPORT")
-      assert_not env.key?("DATABASE_URL")
-      assert_not env.key?("SOLID_QUEUE_DATABASE_URL")
 
       call = command_runner.calls.fetch(0)
       assert_equal env, call.fetch(:env)
