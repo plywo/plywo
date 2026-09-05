@@ -23,13 +23,20 @@ module RailsSqliteSubjectProof
     end
 
     def call(env:, command:, chdir:)
+      verify!(phase: "before", command:, chdir:)
       @delegate.call(env:, command:, chdir:)
     ensure
+      verify!(phase: "after", command:, chdir:)
+    end
+
+    private
+
+    def verify!(phase:, command:, chdir:)
       actual_digest = Digest::SHA256.file(@lockfile).hexdigest
-      if actual_digest != @expected_digest
-        raise Plywo::Github::LocalPullRequestRunner::Error,
-          "Command mutated the Plywo control-plane lockfile: #{command.join(" ")} (chdir=#{chdir})"
-      end
+      return if actual_digest == @expected_digest
+
+      raise Plywo::Github::LocalPullRequestRunner::Error,
+        "Control-plane lockfile was already mutated #{phase} command: #{command.join(" ")} (chdir=#{chdir})"
     end
   end
 
@@ -51,6 +58,7 @@ module RailsSqliteSubjectProof
         baseline_sha = commit(subject_root, "Baseline SQLite behavior")
         write_candidate_behavior(subject_root)
         candidate_sha = commit(subject_root, "Increase SQLite query behavior")
+        verify_tool_lock_unchanged!(tool_lock_digest)
 
         request = build_request(baseline_sha:, candidate_sha:)
         command_runner = GuardedCommandRunner.new(
