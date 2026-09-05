@@ -26,10 +26,10 @@ module RailsSqliteSubjectProof
       @delegate.call(env:, command:, chdir:)
     ensure
       actual_digest = Digest::SHA256.file(@lockfile).hexdigest
-      next if actual_digest == @expected_digest
-
-      raise Plywo::Github::LocalPullRequestRunner::Error,
-        "Command mutated the Plywo control-plane lockfile: #{command.join(" ")} (chdir=#{chdir})"
+      if actual_digest != @expected_digest
+        raise Plywo::Github::LocalPullRequestRunner::Error,
+          "Command mutated the Plywo control-plane lockfile: #{command.join(" ")} (chdir=#{chdir})"
+      end
     end
   end
 
