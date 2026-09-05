@@ -1,4 +1,5 @@
 require "fileutils"
+require "rbconfig"
 
 module Plywo
   module Subject
@@ -16,7 +17,7 @@ module Plywo
         env = env_for(root:, execution:, role:)
         @command_runner.call(
           env:,
-          command: [ root.join("bin", "rails").to_s, "db:prepare" ],
+          command: [ RbConfig.ruby, root.join("bin", "rails").to_s, "db:prepare" ],
           chdir: root.to_s
         )
         env
