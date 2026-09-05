@@ -24,9 +24,12 @@ finalization fence
 cancellation
 executor-service request claim / reclaim
 executor-service request completion
+GitHub webhook delivery claim / completion
 ```
 
 Production lifecycle code should use `Plywo::ClockAuthority.database_now` rather than sampling `Time.current` on whichever host happens to run the transition.
+
+Generic Rails audit timestamps such as `created_at` and `updated_at` are not distributed timing evidence unless a lifecycle explicitly assigns them from the authoritative clock. For example, webhook claim assigns `updated_at` from the same database clock as `started_at` so that one transition has one clock domain.
 
 ## Process-local elapsed duration
 
