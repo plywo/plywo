@@ -41,7 +41,7 @@ module Executor
       execution_id = params.fetch(:execution_id)
       attempt_number = Integer(params.fetch(:attempt_number))
       reason = cancellation_reason
-      cancellation = executor_service.cancel(
+      cancellation = executor_cancellation_service.cancel(
         idempotency_key: "#{execution_id}:#{attempt_number}",
         reason:
       )
@@ -55,8 +55,6 @@ module Executor
       render_error("Invalid JSON: #{error.message}", status: :bad_request)
     rescue KeyError, ArgumentError => error
       render_error(error.message, status: :unprocessable_entity)
-    rescue Plywo::Executor::ServiceResolver::Error => error
-      render_error(error.message, status: :service_unavailable)
     end
 
     private
@@ -87,6 +85,10 @@ module Executor
 
     def executor_service
       Plywo::Executor::Service.new(adapter: executor_service_adapter)
+    end
+
+    def executor_cancellation_service
+      Plywo::Executor::Service.new(adapter: nil)
     end
 
     def executor_service_adapter
