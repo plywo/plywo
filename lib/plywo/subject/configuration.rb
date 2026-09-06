@@ -69,7 +69,7 @@ module Plywo
 
         def validate_scenario_path!(path)
           return if path.nil?
-          return if path.is_a?(String) && path.start_with?("/") && path.length > 1
+          return if path.is_a?(String) && path.start_with?("/")
 
           raise Error, "scenario.path must be an absolute HTTP path starting with /"
         end
