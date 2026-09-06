@@ -61,7 +61,7 @@ module Plywo
         gem_candidates = persistence_gems(root)
         return gem_candidates.first if gem_candidates.one?
 
-        if gem_candidates.many?
+        if gem_candidates.length > 1
           raise Error, "Ambiguous Rails persistence from Gemfile evidence: #{gem_candidates.sort.join(", ")}"
         end
 
