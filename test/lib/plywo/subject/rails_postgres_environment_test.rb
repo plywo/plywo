@@ -50,7 +50,7 @@ class PlywoSubjectRailsPostgresEnvironmentTest < ActiveSupport::TestCase
 
     call = command_runner.calls.fetch(0)
     assert_equal env, call.fetch(:env)
-    assert_equal [ root.join("bin", "rails").to_s, "db:prepare" ], call.fetch(:command)
+    assert_equal [ root.join("bin", "rails").to_s, "db:prepare", "--trace" ], call.fetch(:command)
     assert_equal root.to_s, call.fetch(:chdir)
   end
 
