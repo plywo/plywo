@@ -80,7 +80,17 @@ cleanup() {
   [[ -n "$RAILS_PID" ]] && kill "$RAILS_PID" 2>/dev/null
   [[ -n "$CF_PID" ]] && kill "$CF_PID" 2>/dev/null
 }
-trap cleanup EXIT INT TERM
+
+handle_signal() {
+  local status="$1"
+  trap - INT TERM EXIT
+  cleanup
+  exit "$status"
+}
+
+trap cleanup EXIT
+trap 'handle_signal 130' INT
+trap 'handle_signal 143' TERM
 
 wait_for_http() {
   local url="$1"
