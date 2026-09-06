@@ -51,4 +51,23 @@ class PlywoGithubLocalPullRequestRunnerCommandRunnerTest < ActiveSupport::TestCa
 
     assert_equal "false", output
   end
+
+  test "failure diagnostics report environment keys without values" do
+    runner = Plywo::Github::LocalPullRequestRunner::CommandRunner.new(
+      host_env: { "PATH" => ENV.fetch("PATH"), "HOME" => "/safe/home" }
+    )
+
+    error = assert_raises(Plywo::Github::LocalPullRequestRunner::Error) do
+      runner.call(
+        env: { "PLYWO_SECRET_SENTINEL" => "do-not-print-this-value" },
+        command: [ RbConfig.ruby, "-e", "warn 'expected failure'; exit 1" ],
+        chdir: Rails.root.to_s
+      )
+    end
+
+    assert_includes error.message, "expected failure"
+    assert_includes error.message, "Effective environment keys:"
+    assert_includes error.message, "PLYWO_SECRET_SENTINEL"
+    refute_includes error.message, "do-not-print-this-value"
+  end
 end
