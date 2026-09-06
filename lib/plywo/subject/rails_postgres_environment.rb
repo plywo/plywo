@@ -31,7 +31,7 @@ module Plywo
         env = env_for(root:, execution:, role:)
         @command_runner.call(
           env:,
-          command: [ root.join("bin", "rails").to_s, "db:prepare" ],
+          command: [ root.join("bin", "rails").to_s, "db:prepare", "--trace" ],
           chdir: root.to_s
         )
         env
