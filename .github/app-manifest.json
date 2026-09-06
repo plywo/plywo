@@ -7,7 +7,7 @@
     "active": true
   },
   "redirect_url": "{{PLYWO_PUBLIC_URL}}/github/app/manifest/callback",
-  "public": false,
+  "public": true,
   "default_permissions": {
     "checks": "write",
     "contents": "read",
