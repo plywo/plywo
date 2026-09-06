@@ -1,5 +1,6 @@
 require "test_helper"
 require "base64"
+require "tmpdir"
 
 class PlywoExecutorGitCloneAdapterTest < ActiveSupport::TestCase
   class CommandRunner
@@ -73,6 +74,44 @@ class PlywoExecutorGitCloneAdapterTest < ActiveSupport::TestCase
     assert_includes fetch_call.fetch(:command), "+refs/heads/main:refs/remotes/origin/plywo-base"
     assert_includes fetch_call.fetch(:command), "+refs/pull/40/head:refs/remotes/origin/plywo-candidate"
     refute_predicate repository_roots.fetch(0), :exist?
+  end
+
+  test "places customer repositories outside the Plywo Rails application tree" do
+    command_runner = CommandRunner.new
+    runner = Runner.new(result_payload)
+    repository_roots = []
+    adapter = Plywo::Executor::GitCloneAdapter.new(
+      root: Rails.root,
+      command_runner:,
+      runner_factory: lambda do |repository_root:|
+        repository_roots << repository_root
+        runner
+      end
+    )
+
+    result = adapter.call(
+      request: executor_request,
+      repository_capability: Plywo::Executor::RepositoryCapability.new(token: "clone-token")
+    )
+
+    assert result.success?
+    repository_root = repository_roots.fetch(0).expand_path
+    tool_root = Rails.root.expand_path
+    refute repository_root.to_s.start_with?("#{tool_root}#{File::SEPARATOR}")
+    assert repository_root.to_s.start_with?(Pathname(Dir.tmpdir).expand_path.to_s)
+  end
+
+  test "rejects a workspace nested under a Rails application" do
+    error = assert_raises(Plywo::Executor::GitCloneAdapter::Error) do
+      Plywo::Executor::GitCloneAdapter.new(
+        root: Rails.root,
+        workspace_root: Rails.root.join("tmp", "customer-workspaces"),
+        command_runner: CommandRunner.new
+      )
+    end
+
+    assert_match(/workspace root .* is nested under Rails application/, error.message)
+    assert_includes error.message, Rails.root.to_s
   end
 
   test "resolves a repository capability through an injected provider" do
