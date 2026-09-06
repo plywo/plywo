@@ -2,7 +2,23 @@
 
 Plywo v0.1 aims for a first Behavioral Review in a customer Rails pull request with minimal repository setup.
 
+The repository-side path is now proven end to end on a separate Rails + SQLite sandbox: a deliberate SQL regression produced `DATABASE_QUERY_REGRESSION` / `BLOCK`, while a neutral candidate produced `ALLOW`. The next product surface is the hosted self-service onboarding page at `/onboarding`.
+
 The first onboarding slice keeps the configuration intentionally small. Plywo discovers the Rails runtime and supported persistence automatically, while the repository declares the HTTP scenario that should be replayed against baseline and candidate.
+
+## Hosted self-service flow
+
+The intended customer path is:
+
+1. Open the Plywo `/onboarding` page.
+2. Choose **Install Plywo on GitHub** and grant the GitHub App access to the Rails repository.
+3. Add a minimal `plywo.yml` in the candidate branch.
+4. Open or update a pull request.
+5. Plywo checks out the exact baseline and candidate revisions, bootstraps the supported Rails runtime, discovers PostgreSQL or SQLite, runs the same scenario on both sides, and publishes the Behavioral Review as a GitHub Check plus durable PR feedback.
+
+GitHub App manifests use `/onboarding` as their post-install setup URL and redirect there again when repository access is updated. The page is intentionally informational: GitHub may attach an `installation_id` query parameter, but Plywo does not treat that value as proof of installation ownership. A future authenticated installation dashboard must verify installation ownership through GitHub user authorization before exposing or mutating account-specific installation state.
+
+The local `bin/setup-github-app` / manifest-registration flow remains a **Plywo developer/operator bootstrap**, not a customer onboarding step. Customers should never need the launcher, manifest registration URL, webhook secret, private key, executor token, or local tunnel setup.
 
 ## Minimal configuration
 
@@ -81,22 +97,14 @@ That avoids baking the candidate database implementation into the baseline execu
 
 ## Current five-minute shape
 
-The intended product flow is:
+The target remains one GitHub App installation plus one small declarative file. No Plywo gem, GitHub Action, middleware, initializer, or repository-owned runtime is required for the proven Rails + SQLite path.
 
-1. Install the Plywo GitHub App for the repository.
-2. Add a minimal `plywo.yml` with one HTTP scenario path.
-3. Open or update a pull request.
-4. Plywo checks out exact baseline/candidate subjects.
-5. Rails and PostgreSQL/SQLite are discovered automatically.
-6. Plywo runs the same scenario against both subjects.
-7. The Behavioral Review appears as a GitHub Check and PR feedback.
-
-Today the executor/runtime still needs product deployment work before this is a hosted self-service flow. The repository-side contract in this document is the first step toward that v0.1 onboarding target.
+A fully public cross-account hosted onboarding still requires the production GitHub App to be deployed/registered and exercised from a different GitHub account or organization. The Development App remains private to the `plywo` owner and is only a proof environment.
 
 ## Deliberate limits
 
-This slice does not add arbitrary setup commands, shell hooks, secrets, containers, MySQL, Sidekiq, non-Rails runtimes, or a general-purpose configuration language.
+This slice does not add arbitrary setup commands, shell hooks, customer secrets, containers, MySQL, Sidekiq, non-Rails runtimes, or a general-purpose configuration language.
 
 Those capabilities should be introduced from real onboarding requirements. In particular, customer-authored commands would require a separate trust and execution-policy design; `plywo.yml` currently carries declarative scenario and persistence metadata only.
 
-See #57 and `docs/subject-environments.md`.
+See #73, #65, #57 and `docs/subject-environments.md`.
