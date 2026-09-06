@@ -57,7 +57,8 @@ module RailsSqliteSubjectProof
 
         baseline_sha = commit(subject_root, "Baseline SQLite behavior")
         write_candidate_behavior(subject_root)
-        candidate_sha = commit(subject_root, "Increase SQLite query behavior")
+        write_candidate_configuration(subject_root)
+        candidate_sha = commit(subject_root, "Increase SQLite query behavior and configure Plywo")
         verify_tool_lock_unchanged!(tool_lock_digest)
 
         request = build_request(baseline_sha:, candidate_sha:)
@@ -66,17 +67,19 @@ module RailsSqliteSubjectProof
           lockfile: TOOL_LOCKFILE,
           expected_digest: tool_lock_digest
         )
-        environment = Plywo::Subject::RailsSqliteEnvironment.new(
+        subject_discovery = Plywo::Subject::Discovery.new(
           command_runner:,
-          bundle_path:,
-          bundle_app_config:
+          sqlite_options: {
+            bundle_path:,
+            bundle_app_config:
+          }
         )
         runner = Plywo::Github::LocalPullRequestRunner.new(
           root: subject_root,
           tool_root: TOOL_ROOT,
           command_runner:,
           fetch_repository: false,
-          subject_environment: environment
+          subject_discovery:
         )
         result = Plywo::Executor::LocalAdapter.new(runner:).call(request:)
 
@@ -126,6 +129,16 @@ module RailsSqliteSubjectProof
         QUERY_COUNT = 8
       end
     RUBY
+  end
+
+  def write_candidate_configuration(subject_root)
+    subject_root.join("plywo.yml").write(<<~YAML)
+      version: 1
+      scenario:
+        path: /__plywo/demo/behavior
+      subject:
+        persistence: auto
+    YAML
   end
 
   def build_request(baseline_sha:, candidate_sha:)
@@ -179,6 +192,8 @@ module RailsSqliteSubjectProof
     puts "candidate_sql_queries=#{payload.dig("executions", "candidate", "measurements", "sql_queries")}"
     puts "reason_code=DATABASE_QUERY_REGRESSION"
     puts "merge_recommendation=#{payload.dig("result", "merge_recommendation")}"
+    puts "candidate_config_applied_to_baseline=true"
+    puts "subject_persistence_discovered=sqlite"
     puts "control_plane_lockfile_unchanged=true"
   end
 

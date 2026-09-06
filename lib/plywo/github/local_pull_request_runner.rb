@@ -28,13 +28,15 @@ module Plywo
         tool_root: root,
         command_runner: CommandRunner.new,
         fetch_repository: true,
-        subject_environment: nil
+        subject_environment: nil,
+        subject_discovery: nil
       )
         @root = Pathname(root).expand_path
         @tool_root = Pathname(tool_root).expand_path
         @command_runner = command_runner
         @fetch_repository = fetch_repository
-        @subject_environment = subject_environment || Plywo::Subject::RailsPostgresEnvironment.new(command_runner:)
+        @subject_environment = subject_environment
+        @subject_discovery = subject_discovery || Plywo::Subject::Discovery.new(command_runner:)
       end
 
       def call(execution:)
@@ -48,16 +50,26 @@ module Plywo
         prepare_worktree!(path: paths.fetch(:baseline_root), sha: execution.baseline_sha)
         prepare_worktree!(path: paths.fetch(:candidate_root), sha: execution.candidate_sha)
 
-        baseline_env = @subject_environment.prepare(
+        configuration = Plywo::Subject::Configuration.load(root: paths.fetch(:candidate_root))
+        baseline_subject_environment = subject_environment_for(
+          root: paths.fetch(:baseline_root),
+          configuration:
+        )
+        candidate_subject_environment = subject_environment_for(
+          root: paths.fetch(:candidate_root),
+          configuration:
+        )
+
+        baseline_env = baseline_subject_environment.prepare(
           root: paths.fetch(:baseline_root),
           execution:,
           role: "base"
-        )
-        candidate_env = @subject_environment.prepare(
+        ).merge(configuration.capture_env)
+        candidate_env = candidate_subject_environment.prepare(
           root: paths.fetch(:candidate_root),
           execution:,
           role: "candidate"
-        )
+        ).merge(configuration.capture_env)
 
         capture_subject!(
           execution:,
@@ -83,14 +95,26 @@ module Plywo
         )
       ensure
         if paths
-          @subject_environment.cleanup(root: paths.fetch(:candidate_root), execution:, role: "candidate")
-          @subject_environment.cleanup(root: paths.fetch(:baseline_root), execution:, role: "base")
+          candidate_subject_environment&.cleanup(
+            root: paths.fetch(:candidate_root),
+            execution:,
+            role: "candidate"
+          )
+          baseline_subject_environment&.cleanup(
+            root: paths.fetch(:baseline_root),
+            execution:,
+            role: "base"
+          )
         end
         cleanup_worktree(paths&.fetch(:baseline_root, nil))
         cleanup_worktree(paths&.fetch(:candidate_root, nil))
       end
 
       private
+
+      def subject_environment_for(root:, configuration:)
+        @subject_environment || @subject_discovery.resolve(root:, configuration:)
+      end
 
       def assert_local_subject!(context:)
         candidate_repository = context.fetch("candidate_repository")
