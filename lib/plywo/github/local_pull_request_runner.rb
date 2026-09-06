@@ -1,3 +1,4 @@
+require "bundler"
 require "fileutils"
 require "json"
 require "open3"
@@ -10,7 +11,12 @@ module Plywo
 
       class CommandRunner
         def call(env:, command:, chdir:)
-          stdout, stderr, status = Open3.capture3(env, *command, chdir:)
+          stdout = stderr = status = nil
+
+          Bundler.with_unbundled_env do
+            stdout, stderr, status = Open3.capture3(env, *command, chdir:)
+          end
+
           return stdout if status.success?
 
           raise Error, "Command failed (#{command.join(" ")}): #{stderr.presence || stdout}"
