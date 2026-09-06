@@ -2,6 +2,8 @@
 
 ENV["RAILS_ENV"] ||= "test"
 require_relative "../config/environment"
+require "json"
+require "rbconfig"
 
 module RemoteExecutorTopologyProof
   class StaticRepositoryCapabilityProvider
@@ -17,6 +19,8 @@ module RemoteExecutorTopologyProof
   module_function
 
   def call
+    prove_customer_subprocess_environment_isolated!
+
     request = Plywo::Executor::Request.new(
       schema_version: Plywo::Executor::Request.current_schema_version,
       execution_id: ENV.fetch("PLYWO_PROOF_EXECUTION_ID"),
@@ -59,7 +63,29 @@ module RemoteExecutorTopologyProof
     puts "baseline_sha=#{request.baseline_sha}"
     puts "candidate_sha=#{request.candidate_sha}"
     puts "repository_capability_transport=out_of_band_header"
+    puts "customer_subprocess_env_isolated=true"
     puts "separate_executor_process=true"
+  end
+
+  def prove_customer_subprocess_environment_isolated!
+    secret_keys = %w[
+      PLYWO_REMOTE_EXECUTOR_TOKEN
+      PLYWO_PROOF_REPOSITORY_TOKEN
+      RUBYOPT
+      RUBYLIB
+    ]
+    script = "require 'json'; print JSON.generate(ENV.to_h.slice(*#{(secret_keys + [ "PLYWO_EXPLICIT_SENTINEL" ]).inspect}))"
+    runner = Plywo::Github::LocalPullRequestRunner::CommandRunner.new
+    output = runner.call(
+      env: { "PLYWO_EXPLICIT_SENTINEL" => "visible" },
+      command: [ RbConfig.ruby, "-e", script ],
+      chdir: Rails.root.to_s
+    )
+    child_env = JSON.parse(output)
+
+    leaked = secret_keys.select { |key| child_env.key?(key) }
+    raise "Customer subprocess inherited sensitive host environment: #{leaked.join(", ")}" if leaked.any?
+    raise "Explicit subprocess environment was lost" unless child_env["PLYWO_EXPLICIT_SENTINEL"] == "visible"
   end
 end
 
