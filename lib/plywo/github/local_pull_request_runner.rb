@@ -10,16 +10,46 @@ module Plywo
       Error = Class.new(StandardError)
 
       class CommandRunner
+        SAFE_INHERITED_ENV_KEYS = %w[
+          PATH
+          HOME
+          TMPDIR
+          LANG
+          LC_ALL
+          LC_CTYPE
+          SSL_CERT_FILE
+          SSL_CERT_DIR
+        ].freeze
+
+        def initialize(host_env: ENV)
+          @host_env = host_env
+        end
+
         def call(env:, command:, chdir:)
           stdout = stderr = status = nil
 
           Bundler.with_unbundled_env do
-            stdout, stderr, status = Open3.capture3(env, *command, chdir:)
+            child_env = safe_inherited_environment.merge(env.transform_keys(&:to_s))
+            stdout, stderr, status = Open3.capture3(
+              child_env,
+              *command,
+              chdir:,
+              unsetenv_others: true
+            )
           end
 
           return stdout if status.success?
 
           raise Error, "Command failed (#{command.join(" ")}): #{stderr.presence || stdout}"
+        end
+
+        private
+
+        def safe_inherited_environment
+          SAFE_INHERITED_ENV_KEYS.each_with_object({}) do |key, environment|
+            value = @host_env[key]
+            environment[key] = value if value
+          end
         end
       end
 
