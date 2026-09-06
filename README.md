@@ -58,6 +58,22 @@ bin/plywo diff \
   --format json
 ```
 
+## Rails repository onboarding
+
+The first v0.1 onboarding contract is intentionally small. A customer Rails repository may add:
+
+```yaml
+version: 1
+scenario:
+  path: /orders/42
+subject:
+  persistence: auto
+```
+
+Plywo uses the candidate-head `plywo.yml` as the shared A/B scenario contract and discovers supported persistence independently in each exact Git worktree. Rails + PostgreSQL and Rails + SQLite are currently recognized. Unsupported or ambiguous persistence fails explicitly instead of silently defaulting to PostgreSQL.
+
+See `docs/onboarding.md` for the current five-minute onboarding shape and deliberate limits.
+
 ## Repository map
 
 - `docs/` - product thesis, architecture, decisions, RFCs, demo, roadmap
@@ -70,8 +86,8 @@ bin/plywo diff \
 
 - Ruby 3.4.10
 - Rails 8.1.3.1
-- PostgreSQL
+- PostgreSQL control plane
 
 ## Current status
 
-The diff core and first Rails runtime capture are real and green in CI. The next product-facing slice is to run baseline/candidate subjects from Git worktrees or preview environments and publish the resulting report back to GitHub.
+The GitHub App execution path, durable executor boundary, exact Git A/B worktrees, Rails runtime evidence, PostgreSQL and SQLite customer subject environments, and GitHub Check/PR feedback loop are real and exercised in CI. The current productization target is to make installing Plywo on another Rails repository require only GitHub App installation plus a minimal scenario configuration.
