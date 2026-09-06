@@ -16,6 +16,21 @@ class PlywoSubjectRailsPostgresEnvironmentTest < ActiveSupport::TestCase
     end
   end
 
+  test "declares the subject capabilities it actually provides" do
+    environment = Plywo::Subject::RailsPostgresEnvironment.new(
+      command_runner: CommandRecorder.new,
+      postgres_url: "postgres://db.example"
+    )
+
+    assert_equal [ "rails" ], environment.capabilities_for(:framework)
+    assert_equal [ "postgresql" ], environment.capabilities_for(:persistence)
+    assert_equal [ "solid_queue" ], environment.capabilities_for(:queue)
+    assert environment.capability?("telemetry.subject_owned_rails")
+    assert environment.capability?("runtime.local_process")
+    assert environment.capability?("state.isolated_comparable")
+    assert environment.capability?("evidence.sql_queries")
+  end
+
   test "prepares an isolated Rails PostgreSQL subject environment" do
     command_runner = CommandRecorder.new
     environment = Plywo::Subject::RailsPostgresEnvironment.new(

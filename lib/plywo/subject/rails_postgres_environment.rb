@@ -2,10 +2,24 @@ module Plywo
   module Subject
     class RailsPostgresEnvironment < Environment
       DEFAULT_POSTGRES_URL = "postgres://localhost".freeze
+      CAPABILITIES = %w[
+        framework.rails
+        persistence.postgresql
+        queue.solid_queue
+        telemetry.subject_owned_rails
+        runtime.local_process
+        state.isolated_comparable
+        evidence.sql_queries
+        evidence.background_jobs
+      ].freeze
 
       def initialize(command_runner:, postgres_url: ENV.fetch("PLYWO_LOCAL_POSTGRES_URL", DEFAULT_POSTGRES_URL))
         @command_runner = command_runner
         @postgres_url = postgres_url.sub(%r{/+$}, "")
+      end
+
+      def capabilities
+        CAPABILITIES
       end
 
       def prepare(root:, execution:, role:)

@@ -17,6 +17,18 @@ class PlywoSubjectRailsSqliteEnvironmentTest < ActiveSupport::TestCase
     end
   end
 
+  test "declares the subject capabilities it actually provides" do
+    environment = Plywo::Subject::RailsSqliteEnvironment.new(command_runner: CommandRecorder.new)
+
+    assert_equal [ "rails" ], environment.capabilities_for(:framework)
+    assert_equal [ "sqlite" ], environment.capabilities_for(:persistence)
+    assert_equal [ "active_job_test_adapter" ], environment.capabilities_for(:queue)
+    assert environment.capability?("telemetry.subject_owned_rails")
+    assert environment.capability?("runtime.local_process")
+    assert environment.capability?("state.isolated_comparable")
+    assert environment.capability?("evidence.sql_queries")
+  end
+
   test "prepares an isolated Rails SQLite subject environment" do
     Dir.mktmpdir do |directory|
       command_runner = CommandRecorder.new
