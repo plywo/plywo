@@ -185,3 +185,134 @@ jobs:
 
       - name: RuboCop
         run: bundle exec rubocop
+
+  remote_executor_topology:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: plywo_executor_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d plywo_executor_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PLYWO_IMAGE: plywo-ci:${{ github.sha }}
+      EXECUTOR_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/plywo_executor_ci
+      PLYWO_EXECUTOR_SERVICE_TOKEN: ci-executor-service-token
+      PLYWO_PROOF_EXECUTION_ID: github-topology-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build deployable image
+        run: docker build -t "$PLYWO_IMAGE" .
+
+      - name: Prepare executor database
+        run: |
+          docker run --rm --network host \
+            -e SECRET_KEY_BASE_DUMMY=1 \
+            -e RAILS_ENV=production \
+            -e DATABASE_URL="$EXECUTOR_DATABASE_URL" \
+            -e SOLID_QUEUE_DATABASE_URL="$EXECUTOR_DATABASE_URL" \
+            -e PLYWO_RUNTIME_ROLE=executor_service \
+            -e PLYWO_EXECUTOR_SERVICE_TOKEN="$PLYWO_EXECUTOR_SERVICE_TOKEN" \
+            -e PLYWO_EXECUTOR_SERVICE_ADAPTER=git_clone \
+            "$PLYWO_IMAGE" bin/rails db:prepare
+
+      - name: Start production executor service
+        run: |
+          docker run -d --name plywo-executor --network host \
+            -e SECRET_KEY_BASE_DUMMY=1 \
+            -e RAILS_ENV=production \
+            -e DATABASE_URL="$EXECUTOR_DATABASE_URL" \
+            -e SOLID_QUEUE_DATABASE_URL="$EXECUTOR_DATABASE_URL" \
+            -e PLYWO_RUNTIME_ROLE=executor_service \
+            -e PLYWO_EXECUTOR_SERVICE_TOKEN="$PLYWO_EXECUTOR_SERVICE_TOKEN" \
+            -e PLYWO_EXECUTOR_SERVICE_ADAPTER=git_clone \
+            -e PLYWO_LOCAL_POSTGRES_URL=postgres://postgres:postgres@127.0.0.1:5432 \
+            "$PLYWO_IMAGE" bin/rails server -b 0.0.0.0 -p 4010
+
+      - name: Verify executor readiness and secret isolation
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:4010/ready > /tmp/plywo-executor-ready.json; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              docker logs plywo-executor
+              exit 1
+            fi
+            sleep 1
+          done
+          cat /tmp/plywo-executor-ready.json
+          docker exec plywo-executor sh -lc '
+            test -z "${PLYWO_GITHUB_PRIVATE_KEY_PATH:-}" &&
+            test -z "${PLYWO_GITHUB_WEBHOOK_SECRET:-}" &&
+            test -z "${PLYWO_GITHUB_APP_ID:-}" &&
+            test -z "${PLYWO_REMOTE_EXECUTOR_URL:-}" &&
+            test -z "${PLYWO_REMOTE_EXECUTOR_TOKEN:-}"
+          '
+
+      - name: Dispatch Request v1 from separate control-plane client
+        env:
+          PLYWO_PROOF_REPOSITORY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker run --rm --network host \
+            -e SECRET_KEY_BASE_DUMMY=1 \
+            -e RAILS_ENV=production \
+            -e DATABASE_URL="$EXECUTOR_DATABASE_URL" \
+            -e PLYWO_REMOTE_EXECUTOR_URL=http://127.0.0.1:4010/v1/executions \
+            -e PLYWO_REMOTE_EXECUTOR_TOKEN="$PLYWO_EXECUTOR_SERVICE_TOKEN" \
+            -e PLYWO_PROOF_REPOSITORY_TOKEN="$PLYWO_PROOF_REPOSITORY_TOKEN" \
+            -e PLYWO_PROOF_EXECUTION_ID="$PLYWO_PROOF_EXECUTION_ID" \
+            -e PLYWO_PROOF_REPOSITORY="${{ github.repository }}" \
+            -e PLYWO_PROOF_PULL_REQUEST_NUMBER="${{ github.event.pull_request.number }}" \
+            -e PLYWO_PROOF_BASELINE_REF="${{ github.base_ref }}" \
+            -e PLYWO_PROOF_CANDIDATE_REF="${{ github.head_ref }}" \
+            -e PLYWO_PROOF_BASELINE_SHA="${{ github.event.pull_request.base.sha }}" \
+            -e PLYWO_PROOF_CANDIDATE_SHA="${{ github.event.pull_request.head.sha }}" \
+            "$PLYWO_IMAGE" ruby script/prove_remote_executor_topology.rb
+
+      - name: Verify repository capability was not persisted
+        env:
+          EXPECTED_REPOSITORY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker run --rm --network host \
+            -e SECRET_KEY_BASE_DUMMY=1 \
+            -e RAILS_ENV=production \
+            -e DATABASE_URL="$EXECUTOR_DATABASE_URL" \
+            -e SOLID_QUEUE_DATABASE_URL="$EXECUTOR_DATABASE_URL" \
+            -e PLYWO_RUNTIME_ROLE=executor_service \
+            -e PLYWO_EXECUTOR_SERVICE_TOKEN="$PLYWO_EXECUTOR_SERVICE_TOKEN" \
+            -e PLYWO_EXECUTOR_SERVICE_ADAPTER=git_clone \
+            -e PLYWO_PROOF_EXECUTION_ID="$PLYWO_PROOF_EXECUTION_ID" \
+            -e EXPECTED_REPOSITORY_TOKEN="$EXPECTED_REPOSITORY_TOKEN" \
+            "$PLYWO_IMAGE" bin/rails runner '
+              record = PlywoExecutorRequest.find_by!(idempotency_key: "#{ENV.fetch("PLYWO_PROOF_EXECUTION_ID")}:1")
+              raise "Executor request did not complete" unless record.status == "completed"
+              serialized = record.attributes.to_json
+              raise "Repository capability leaked into executor ledger" if serialized.include?(ENV.fetch("EXPECTED_REPOSITORY_TOKEN"))
+              puts "executor_ledger_status=completed"
+              puts "repository_capability_persisted=false"
+            '
+
+      - name: Executor logs
+        if: always()
+        run: docker logs plywo-executor || true
+
+      - name: Stop executor service
+        if: always()
+        run: docker rm -f plywo-executor || true
