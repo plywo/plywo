@@ -9,14 +9,16 @@ module Plywo
 
       def self.from_env(env: ENV, rails_env: ::Rails.env)
         explicit = env["PLYWO_RUNTIME_ROLE"].to_s
-        name = if !explicit.empty?
-          explicit
-        elsif env["PLYWO_EXECUTOR_SERVICE"] == "1"
-          "executor_service"
-        elsif %w[development test].include?(rails_env.to_s)
-          "combined"
+        name = if explicit.empty?
+          if env["PLYWO_EXECUTOR_SERVICE"] == "1"
+            "executor_service"
+          elsif %w[development test].include?(rails_env.to_s)
+            "combined"
+          else
+            "control_plane"
+          end
         else
-          "control_plane"
+          explicit
         end
 
         new(name)
