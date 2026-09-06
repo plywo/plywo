@@ -10,10 +10,12 @@ module Plywo
       def initialize(
         root: ::Rails.root,
         command_runner: Plywo::Github::LocalPullRequestRunner::CommandRunner.new,
-        runner_factory: nil
+        runner_factory: nil,
+        repository_capability_provider: nil
       )
         @root = Pathname(root).expand_path
         @command_runner = command_runner
+        @repository_capability_provider = repository_capability_provider
         @runner_factory = runner_factory || lambda do |repository_root:|
           subject_bootstrap = Plywo::Subject::RailsBundleBootstrap.new(
             command_runner: @command_runner,
@@ -30,6 +32,7 @@ module Plywo
       end
 
       def call(request:, repository_capability: nil)
+        repository_capability ||= @repository_capability_provider&.call(request:)
         raise Error, "Repository capability is required for git clone execution" unless repository_capability
 
         context = request.context
