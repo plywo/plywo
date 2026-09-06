@@ -1,12 +1,17 @@
 Rails.application.routes.draw do
+  runtime_role = Plywo::Runtime::Role.from_env
+
   root "home#index"
   get "up" => "rails/health#show", as: :rails_health_check
+  get "ready" => "readiness#show", as: :readiness_check
 
-  get "/github/app/register" => "github/app_manifests#new", as: :github_app_register
-  get "/github/app/manifest/callback" => "github/app_manifests#callback", as: :github_app_manifest_callback
-  post "/github/webhooks" => "github/webhooks#create", as: :github_webhooks
+  if runtime_role.control_plane?
+    get "/github/app/register" => "github/app_manifests#new", as: :github_app_register
+    get "/github/app/manifest/callback" => "github/app_manifests#callback", as: :github_app_manifest_callback
+    post "/github/webhooks" => "github/webhooks#create", as: :github_webhooks
+  end
 
-  if Rails.env.test? || ENV["PLYWO_EXECUTOR_SERVICE"] == "1"
+  if runtime_role.executor_service?
     post "/v1/executions" => "executor/executions#create", as: :executor_service_executions
     post "/v1/executions/:execution_id/attempts/:attempt_number/cancel" => "executor/executions#cancel",
       as: :cancel_executor_service_execution
