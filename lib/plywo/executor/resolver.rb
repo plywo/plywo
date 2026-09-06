@@ -5,7 +5,7 @@ module Plywo
 
       def self.from_env(root: ::Rails.root, env: ENV, rails_env: ::Rails.env)
         mode = env["PLYWO_EXECUTOR"] || env["PLYWO_GITHUB_EXECUTION_MODE"]
-        mode ||= rails_env.development? ? "local" : "disabled"
+        mode ||= rails_env.development? ? "git_clone" : "disabled"
 
         case mode
         when "local"
