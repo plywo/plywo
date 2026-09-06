@@ -88,6 +88,7 @@ module RailsSqliteSubjectProof
     strip_plywo_runtime(subject_root)
     write_clean_application(subject_root)
     write_clean_application_job(subject_root)
+    write_clean_behavior_controller(subject_root)
     write_clean_schema(subject_root)
     create_lockfile(subject_root)
 
@@ -128,6 +129,29 @@ module RailsSqliteSubjectProof
   def write_clean_application_job(subject_root)
     subject_root.join("app", "jobs", "application_job.rb").write(<<~RUBY)
       class ApplicationJob < ActiveJob::Base
+      end
+    RUBY
+  end
+
+  def write_clean_behavior_controller(subject_root)
+    subject_root.join("app", "controllers", "demo", "behavior_controller.rb").write(<<~RUBY)
+      require Rails.root.join("config/behavior_profile").to_s
+
+      module Demo
+        class BehaviorController < ApplicationController
+          skip_forgery_protection
+
+          def create
+            ApplicationRecord.uncached do
+              RailsSqliteSubject::QUERY_COUNT.times do
+                Widget.where(id: -1).load
+              end
+            end
+
+            DemoJob.perform_later
+            render json: { ok: true }
+          end
+        end
       end
     RUBY
   end
@@ -248,6 +272,7 @@ module RailsSqliteSubjectProof
     puts "dependency_bootstrap=automatic"
     puts "capture_runtime=tool_owned_portable_rails"
     puts "customer_plywo_runtime_files=false"
+    puts "customer_controller_knows_plywo=false"
     puts "control_plane_lockfile_unchanged=true"
   end
 
