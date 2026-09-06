@@ -241,7 +241,7 @@ start_quick_tunnel() {
 
   local i public_url
   for ((i = 1; i <= 30; i++)); do
-    public_url="$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare.com' "$CF_LOG" | tail -1 || true)"
+    public_url="$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' "$CF_LOG" | tail -1 || true)"
     if [[ -n "$public_url" ]]; then
       export PLYWO_PUBLIC_URL="$public_url"
       log "Quick Tunnel: ${PLYWO_PUBLIC_URL}"
