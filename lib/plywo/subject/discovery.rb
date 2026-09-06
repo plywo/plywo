@@ -17,7 +17,7 @@ module Plywo
         @sqlite_options = sqlite_options
       end
 
-      def resolve(root:, configuration:)
+      def resolve(root:, configuration:, runtime_env: {})
         root = Pathname(root).expand_path
         assert_rails!(root)
 
@@ -26,9 +26,17 @@ module Plywo
 
         case persistence
         when "postgresql"
-          RailsPostgresEnvironment.new(command_runner: @command_runner, **@postgres_options)
+          RailsPostgresEnvironment.new(
+            command_runner: @command_runner,
+            **@postgres_options,
+            runtime_env:
+          )
         when "sqlite"
-          RailsSqliteEnvironment.new(command_runner: @command_runner, **@sqlite_options)
+          RailsSqliteEnvironment.new(
+            command_runner: @command_runner,
+            **@sqlite_options,
+            runtime_env:
+          )
         else
           raise Error, "Unsupported Rails subject persistence #{persistence.inspect}"
         end
