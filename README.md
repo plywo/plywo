@@ -72,6 +72,8 @@ subject:
 
 Plywo uses the candidate-head `plywo.yml` as the shared A/B scenario contract and discovers supported persistence independently in each exact Git worktree. Rails + PostgreSQL and Rails + SQLite are currently recognized. Unsupported or ambiguous persistence fails explicitly instead of silently defaulting to PostgreSQL.
 
+The control plane exposes `/onboarding` as the customer-facing entry point: install the GitHub App, copy the minimal configuration, then open or update a pull request. The local `bin/setup-github-app` flow is developer/operator bootstrap and is not part of customer onboarding.
+
 See `docs/onboarding.md` for the current five-minute onboarding shape and deliberate limits.
 
 ## Repository map
@@ -90,4 +92,4 @@ See `docs/onboarding.md` for the current five-minute onboarding shape and delibe
 
 ## Current status
 
-The GitHub App execution path, durable executor boundary, exact Git A/B worktrees, Rails runtime evidence, PostgreSQL and SQLite customer subject environments, and GitHub Check/PR feedback loop are real and exercised in CI. The current productization target is to make installing Plywo on another Rails repository require only GitHub App installation plus a minimal scenario configuration.
+The GitHub App execution path, durable executor boundary, exact Git A/B worktrees, Rails runtime evidence, PostgreSQL and SQLite customer subject environments, and GitHub Check/PR feedback loop are real and exercised in CI and in a separate live customer-like sandbox. The current productization target is a public hosted GitHub App that turns `/onboarding` into a cross-account install-to-first-review path without operator intervention.
