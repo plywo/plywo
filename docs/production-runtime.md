@@ -1,6 +1,6 @@
 # Production runtime
 
-Plywo production is intentionally split into two trust domains even though both roles currently ship from the same Rails codebase.
+Plywo production is intentionally split into two trust domains even though both roles currently ship from the same Rails codebase and container image.
 
 ```text
 GitHub
@@ -52,6 +52,24 @@ The executor service must not receive the GitHub App private key or webhook secr
 
 Production `/ready` deliberately rejects `combined`. Deployment isolation is part of the product boundary, not only an operational preference.
 
+## Container artifact
+
+The repository root `Dockerfile` packages the same Plywo codebase for either production role. Role selection remains runtime configuration rather than image-specific code.
+
+```text
+same image
+  + PLYWO_RUNTIME_ROLE=control_plane
+      -> GitHub-facing control plane
+
+same image
+  + PLYWO_RUNTIME_ROLE=executor_service
+      -> isolated executor service
+```
+
+The image includes Git plus the PostgreSQL/SQLite build/runtime dependencies needed by Plywo's currently supported Rails subject proofs. It deliberately does not yet define arbitrary customer dependency bootstrap or customer-authored setup hooks.
+
+A reverse proxy or platform ingress should terminate public TLS. The control plane's configured remote executor URL is still required to use HTTPS in production readiness policy.
+
 ## Liveness vs readiness
 
 ```text
@@ -80,6 +98,7 @@ The readiness response contains only status, role and configuration error descri
 | `PLYWO_REMOTE_EXECUTOR_TOKEN` | required | forbidden |
 | `PLYWO_EXECUTOR_SERVICE_TOKEN` | do not need | required |
 | `PLYWO_EXECUTOR_SERVICE_ADAPTER` | do not need | `git_clone` |
+| `PLYWO_LOCAL_POSTGRES_URL` | do not need | PostgreSQL subject authority when applicable |
 
 The control-plane `PLYWO_REMOTE_EXECUTOR_TOKEN` and executor-side `PLYWO_EXECUTOR_SERVICE_TOKEN` are the two ends of the same service-authentication credential. They should be injected into different deployments.
 
@@ -112,6 +131,41 @@ The production manifest `.github/app-manifest.json` is public because Plywo v0.1
 
 Public visibility does not imply GitHub Marketplace publication. A public GitHub App can be installed directly from its installation page while Marketplace remains a later product/distribution decision.
 
+## CI topology proof
+
+Pull requests from the Plywo repository run a separate `remote_executor_topology` job.
+
+The proof deliberately uses separate containers/processes:
+
+```text
+control-plane client container
+  - has service credential
+  - has short-lived repository capability
+  - sends Request v1
+        |
+        | HTTP + out-of-band Plywo-Repository-Authorization
+        v
+production executor container
+  - PLYWO_RUNTIME_ROLE=executor_service
+  - PLYWO_EXECUTOR_SERVICE_ADAPTER=git_clone
+  - no GitHub App private key
+  - no webhook secret
+  - no remote-executor recursion config
+  - /ready == 200
+        |
+        v
+  disposable clone of exact PR base/head
+        |
+        v
+  Result v1
+```
+
+The CI job-scoped GitHub token stands in for the production installation token only for this clone transport proof. It is repository-scoped, short-lived, sent through the same out-of-band capability header, and never injected into the executor service environment. Existing `RepositoryCapabilityProvider` tests separately prove the GitHub App installation-token minting contract.
+
+After execution, CI reads the durable executor-request ledger and proves that the repository capability value was not persisted.
+
+This validates the deployable transport/trust boundary without requiring a live production GitHub App installation in CI.
+
 ## Compatibility
 
 `PLYWO_EXECUTOR_SERVICE=1` remains a compatibility signal. When `PLYWO_RUNTIME_ROLE` is absent, that flag resolves the deployment to `executor_service`.
@@ -133,13 +187,12 @@ A successful liveness check with failed readiness is not a healthy Plywo deploym
 
 ## Still deliberately deferred
 
-This slice establishes runtime isolation and configuration readiness. It does not yet provide:
+The deployable image and separate-process executor path are now proven. Remaining runtime/product boundaries include:
 
-- a container image / concrete hosting target
+- arbitrary customer dependency/bootstrap policy beyond Plywo-on-Plywo compatible bundles
 - hard worker/container termination
 - worker-host heartbeat independent of control-plane queueing
 - fork PR multi-repository capabilities
-- arbitrary customer setup shell hooks
+- arbitrary customer setup shell hooks and secret injection policy
 - non-Rails subject runtimes
-
-The next deployment slice should package these two roles into an actual repeatable production artifact and prove a control-plane -> executor-service request across separate processes or hosts.
+- concrete production hosting/IaC and public control-plane deployment
