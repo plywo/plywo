@@ -1,11 +1,13 @@
 #!/usr/bin/env ruby
 
-require "json"
-require "securerandom"
-
 SUBJECT_ROOT = Dir.pwd.freeze
 
+# Boot the subject bundle before requiring default gems from the runner process.
+# Otherwise Ruby can activate a different default-gem version (for example json)
+# before Bundler has a chance to resolve the customer application's lockfile.
 require File.join(SUBJECT_ROOT, "config/environment")
+require "json"
+require "securerandom"
 require "rack/mock_request"
 
 unless defined?(Plywo::Rails::ExecutionQuiescence)
