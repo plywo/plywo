@@ -11,6 +11,26 @@ class PlywoExecutorResolverTest < ActiveSupport::TestCase
     assert_instance_of Plywo::Executor::LocalAdapter, adapter
   end
 
+  test "defaults development to the authenticated git clone adapter" do
+    adapter = Plywo::Executor::Resolver.from_env(
+      root: Rails.root,
+      env: {},
+      rails_env: ActiveSupport::EnvironmentInquirer.new("development")
+    )
+
+    assert_instance_of Plywo::Executor::GitCloneAdapter, adapter
+  end
+
+  test "resolves the authenticated git clone adapter explicitly" do
+    adapter = Plywo::Executor::Resolver.from_env(
+      root: Rails.root,
+      env: { "PLYWO_EXECUTOR" => "git_clone" },
+      rails_env: ActiveSupport::EnvironmentInquirer.new("test")
+    )
+
+    assert_instance_of Plywo::Executor::GitCloneAdapter, adapter
+  end
+
   test "resolves the remote HTTP adapter from explicit configuration" do
     adapter = Plywo::Executor::Resolver.from_env(
       root: Rails.root,
