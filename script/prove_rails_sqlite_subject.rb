@@ -44,21 +44,16 @@ module RailsSqliteSubjectProof
 
   def call
     Dir.mktmpdir("plywo-rails-sqlite-subject-") do |directory|
-      Dir.mktmpdir("plywo-rails-sqlite-bundle-") do |bundle_directory|
+      Dir.mktmpdir("plywo-rails-sqlite-bootstrap-") do |bootstrap_directory|
         subject_root = Pathname(directory)
-        bundle_root = Pathname(bundle_directory)
-        bundle_path = bundle_root.join("gems")
-        bundle_app_config = bundle_root.join("config")
+        bootstrap_root = Pathname(bootstrap_directory)
         tool_lock_digest = Digest::SHA256.file(TOOL_LOCKFILE).hexdigest
 
         prepare_subject_repository(subject_root)
-        ensure_subject_bundle(subject_root, bundle_path:, bundle_app_config:)
-        verify_tool_lock_unchanged!(tool_lock_digest)
-
-        baseline_sha = commit(subject_root, "Baseline SQLite behavior")
+        baseline_sha = commit(subject_root, "Baseline clean Rails behavior")
         write_candidate_behavior(subject_root)
         write_candidate_configuration(subject_root)
-        candidate_sha = commit(subject_root, "Increase SQLite query behavior and configure Plywo")
+        candidate_sha = commit(subject_root, "Increase query behavior and configure Plywo")
         verify_tool_lock_unchanged!(tool_lock_digest)
 
         request = build_request(baseline_sha:, candidate_sha:)
@@ -67,23 +62,21 @@ module RailsSqliteSubjectProof
           lockfile: TOOL_LOCKFILE,
           expected_digest: tool_lock_digest
         )
-        subject_discovery = Plywo::Subject::Discovery.new(
+        subject_bootstrap = Plywo::Subject::RailsBundleBootstrap.new(
           command_runner:,
-          sqlite_options: {
-            bundle_path:,
-            bundle_app_config:
-          }
+          cache_root: bootstrap_root
         )
         runner = Plywo::Github::LocalPullRequestRunner.new(
           root: subject_root,
           tool_root: TOOL_ROOT,
           command_runner:,
           fetch_repository: false,
-          subject_discovery:
+          subject_bootstrap:
         )
         result = Plywo::Executor::LocalAdapter.new(runner:).call(request:)
 
         verify!(result)
+        verify_clean_customer!(subject_root)
         verify_tool_lock_unchanged!(tool_lock_digest)
         print_proof(request:, result:)
       end
@@ -92,28 +85,92 @@ module RailsSqliteSubjectProof
 
   def prepare_subject_repository(subject_root)
     FileUtils.cp_r("#{FIXTURE_ROOT}/.", subject_root)
-    FileUtils.mkdir_p(subject_root.join("lib", "plywo"))
-    FileUtils.cp(TOOL_ROOT.join("lib", "plywo", "execution_context.rb"), subject_root.join("lib", "plywo"))
-    FileUtils.cp_r(TOOL_ROOT.join("lib", "plywo", "rails"), subject_root.join("lib", "plywo", "rails"))
+    strip_plywo_runtime(subject_root)
+    write_clean_application(subject_root)
+    write_clean_application_job(subject_root)
+    write_clean_behavior_controller(subject_root)
+    write_clean_schema(subject_root)
+    create_lockfile(subject_root)
 
     run!(%w[git init -q], chdir: subject_root)
     run!([ "git", "config", "user.email", "sqlite-proof@plywo.local" ], chdir: subject_root)
     run!([ "git", "config", "user.name", "Plywo SQLite Proof" ], chdir: subject_root)
   end
 
-  def ensure_subject_bundle(subject_root, bundle_path:, bundle_app_config:)
-    env = {
-      "BUNDLE_GEMFILE" => subject_root.join("Gemfile").to_s,
-      "BUNDLE_PATH" => bundle_path.to_s,
-      "BUNDLE_APP_CONFIG" => bundle_app_config.to_s,
-      "BUNDLE_DEPLOYMENT" => "false",
-      "BUNDLE_FROZEN" => "false"
-    }
+  def strip_plywo_runtime(subject_root)
+    FileUtils.rm_rf(subject_root.join("lib", "plywo"))
+    FileUtils.rm_f(subject_root.join("app", "models", "current.rb"))
+    FileUtils.rm_f(subject_root.join("app", "models", "plywo_evidence_event.rb"))
+    FileUtils.rm_f(subject_root.join("app", "models", "plywo_execution_work_item.rb"))
+    FileUtils.rm_f(subject_root.join("config", "initializers", "runtime_evidence_bridge.rb"))
+  end
 
+  def write_clean_application(subject_root)
+    subject_root.join("config", "application.rb").write(<<~RUBY)
+      require_relative "boot"
+
+      require "rails"
+      require "active_record/railtie"
+      require "active_job/railtie"
+      require "action_controller/railtie"
+
+      Bundler.require(*Rails.groups)
+
+      module RailsSqliteSubject
+        class Application < Rails::Application
+          config.load_defaults 8.1
+          config.active_job.queue_adapter = :test
+          config.secret_key_base = "plywo-rails-sqlite-subject-fixture"
+        end
+      end
+    RUBY
+  end
+
+  def write_clean_application_job(subject_root)
+    subject_root.join("app", "jobs", "application_job.rb").write(<<~RUBY)
+      class ApplicationJob < ActiveJob::Base
+      end
+    RUBY
+  end
+
+  def write_clean_behavior_controller(subject_root)
+    subject_root.join("app", "controllers", "demo", "behavior_controller.rb").write(<<~RUBY)
+      require Rails.root.join("config/behavior_profile").to_s
+
+      module Demo
+        class BehaviorController < ApplicationController
+          skip_forgery_protection
+
+          def create
+            ApplicationRecord.uncached do
+              RailsSqliteSubject::QUERY_COUNT.times do
+                Widget.where(id: -1).load
+              end
+            end
+
+            DemoJob.perform_later
+            render json: { ok: true }
+          end
+        end
+      end
+    RUBY
+  end
+
+  def write_clean_schema(subject_root)
+    subject_root.join("db", "schema.rb").write(<<~RUBY)
+      ActiveRecord::Schema[8.1].define(version: 2026_09_05_000001) do
+        create_table "widgets", force: :cascade do |t|
+          t.datetime "created_at", null: false
+          t.string "name"
+          t.datetime "updated_at", null: false
+        end
+      end
+    RUBY
+  end
+
+  def create_lockfile(subject_root)
     Bundler.with_unbundled_env do
-      return if run(%w[bundle check], chdir: subject_root, env:, allow_failure: true)
-
-      run!(%w[bundle install --jobs 4 --retry 3], chdir: subject_root, env:)
+      run!(%w[bundle lock], chdir: subject_root)
     end
   end
 
@@ -163,16 +220,34 @@ module RailsSqliteSubjectProof
     raise "SQLite subject execution failed: #{result.error_class}: #{result.error_message}" unless result.success?
 
     payload = result.payload
-    baseline_queries = payload.dig("executions", "baseline", "measurements", "sql_queries")
-    candidate_queries = payload.dig("executions", "candidate", "measurements", "sql_queries")
+    baseline = payload.dig("executions", "baseline")
+    candidate = payload.dig("executions", "candidate")
+    baseline_queries = baseline.dig("measurements", "sql_queries")
+    candidate_queries = candidate.dig("measurements", "sql_queries")
     finding = payload.dig("result", "findings")&.find do |item|
       item["reason_code"] == "DATABASE_QUERY_REGRESSION"
     end
 
+    raise "Expected portable tool-owned capture for baseline" unless baseline.dig("lifecycle", "capture_runtime") == "tool_owned_portable_rails"
+    raise "Expected portable tool-owned capture for candidate" unless candidate.dig("lifecycle", "capture_runtime") == "tool_owned_portable_rails"
     raise "SQLite baseline query evidence is missing" unless baseline_queries.is_a?(Numeric)
     raise "SQLite candidate query evidence is missing" unless candidate_queries.is_a?(Numeric)
     raise "Expected candidate SQLite query count to exceed baseline" unless candidate_queries > baseline_queries
     raise "Expected DATABASE_QUERY_REGRESSION from SQLite subject" unless finding
+  end
+
+  def verify_clean_customer!(subject_root)
+    forbidden = [
+      subject_root.join("lib", "plywo"),
+      subject_root.join("app", "models", "current.rb"),
+      subject_root.join("app", "models", "plywo_evidence_event.rb"),
+      subject_root.join("app", "models", "plywo_execution_work_item.rb"),
+      subject_root.join("config", "initializers", "runtime_evidence_bridge.rb")
+    ]
+    present = forbidden.select(&:exist?)
+    return if present.empty?
+
+    raise "Customer fixture still owns Plywo runtime files: #{present.join(", ")}"
   end
 
   def verify_tool_lock_unchanged!(expected_digest)
@@ -184,7 +259,7 @@ module RailsSqliteSubjectProof
 
   def print_proof(request:, result:)
     payload = result.payload
-    puts "Rails + SQLite customer subject proof"
+    puts "Arbitrary Rails + SQLite customer bootstrap proof"
     puts "request_schema=#{request.schema_version}"
     puts "result_schema=#{result.schema_version}"
     puts "result_status=#{result.status}"
@@ -194,6 +269,10 @@ module RailsSqliteSubjectProof
     puts "merge_recommendation=#{payload.dig("result", "merge_recommendation")}"
     puts "candidate_config_applied_to_baseline=true"
     puts "subject_persistence_discovered=sqlite"
+    puts "dependency_bootstrap=automatic"
+    puts "capture_runtime=tool_owned_portable_rails"
+    puts "customer_plywo_runtime_files=false"
+    puts "customer_controller_knows_plywo=false"
     puts "control_plane_lockfile_unchanged=true"
   end
 
@@ -202,15 +281,6 @@ module RailsSqliteSubjectProof
     return stdout if status.success?
 
     raise "Command failed (#{command.join(" ")}): #{stderr.presence || stdout}"
-  end
-
-  def run(command, chdir:, env: {}, allow_failure: false)
-    run!(command, chdir:, env:)
-    true
-  rescue StandardError
-    raise unless allow_failure
-
-    false
   end
 end
 

@@ -29,7 +29,9 @@ module Plywo
         command_runner: CommandRunner.new,
         fetch_repository: true,
         subject_environment: nil,
-        subject_discovery: nil
+        subject_discovery: nil,
+        subject_bootstrap: nil,
+        capture_runtime: nil
       )
         @root = Pathname(root).expand_path
         @tool_root = Pathname(tool_root).expand_path
@@ -37,6 +39,8 @@ module Plywo
         @fetch_repository = fetch_repository
         @subject_environment = subject_environment
         @subject_discovery = subject_discovery || Plywo::Subject::Discovery.new(command_runner:)
+        @subject_bootstrap = subject_bootstrap
+        @capture_runtime = capture_runtime || Plywo::Subject::RailsCaptureRuntime.new
       end
 
       def call(execution:)
@@ -51,13 +55,18 @@ module Plywo
         prepare_worktree!(path: paths.fetch(:candidate_root), sha: execution.candidate_sha)
 
         configuration = Plywo::Subject::Configuration.load(root: paths.fetch(:candidate_root))
+        baseline_runtime_env = bootstrap_subject(root: paths.fetch(:baseline_root))
+        candidate_runtime_env = bootstrap_subject(root: paths.fetch(:candidate_root))
+
         baseline_subject_environment = subject_environment_for(
           root: paths.fetch(:baseline_root),
-          configuration:
+          configuration:,
+          runtime_env: baseline_runtime_env
         )
         candidate_subject_environment = subject_environment_for(
           root: paths.fetch(:candidate_root),
-          configuration:
+          configuration:,
+          runtime_env: candidate_runtime_env
         )
 
         baseline_env = baseline_subject_environment.prepare(
@@ -112,8 +121,16 @@ module Plywo
 
       private
 
-      def subject_environment_for(root:, configuration:)
-        @subject_environment || @subject_discovery.resolve(root:, configuration:)
+      def bootstrap_subject(root:)
+        return {} unless @subject_bootstrap
+
+        @subject_bootstrap.call(root:)
+      end
+
+      def subject_environment_for(root:, configuration:, runtime_env:)
+        return @subject_environment if @subject_environment
+
+        @subject_discovery.resolve(root:, configuration:, runtime_env:)
       end
 
       def assert_local_subject!(context:)
@@ -151,18 +168,20 @@ module Plywo
       end
 
       def capture_subject!(execution:, root:, label:, sha:, environment:, output:)
+        capture_script = @capture_runtime.script_for(root:, tool_root: @tool_root)
         env = environment.merge(
           "PLYWO_RUN_ID" => execution.execution_id,
           "PLYWO_SCENARIO_ID" => execution.scenario_id,
           "PLYWO_SUBJECT" => "github-pull-request",
           "PLYWO_EXECUTION_LABEL" => label,
           "PLYWO_EXECUTION_SHA" => sha,
-          "PLYWO_OUTPUT" => output.to_s
+          "PLYWO_OUTPUT" => output.to_s,
+          "PLYWO_CAPTURE_RUNTIME" => @capture_runtime.mode_for(root:)
         )
 
         run!(
           env:,
-          command: [ RbConfig.ruby, @tool_root.join("script", "plywo_capture_subject.rb").to_s ],
+          command: [ RbConfig.ruby, capture_script.to_s ],
           chdir: root
         )
       end

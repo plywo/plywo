@@ -13,9 +13,14 @@ module Plywo
         evidence.background_jobs
       ].freeze
 
-      def initialize(command_runner:, postgres_url: ENV.fetch("PLYWO_LOCAL_POSTGRES_URL", DEFAULT_POSTGRES_URL))
+      def initialize(
+        command_runner:,
+        postgres_url: ENV.fetch("PLYWO_LOCAL_POSTGRES_URL", DEFAULT_POSTGRES_URL),
+        runtime_env: {}
+      )
         @command_runner = command_runner
         @postgres_url = postgres_url.sub(%r{/+$}, "")
+        @runtime_env = runtime_env.transform_keys(&:to_s)
       end
 
       def capabilities
@@ -33,7 +38,7 @@ module Plywo
       end
 
       def env_for(root:, execution:, role:)
-        {
+        @runtime_env.merge(
           "BUNDLE_GEMFILE" => root.join("Gemfile").to_s,
           "RAILS_ENV" => "test",
           "DATABASE_URL" => database_url(execution:, role:),
@@ -45,7 +50,7 @@ module Plywo
           "PLYWO_QUIESCENCE_TIMEOUT_SECONDS" => "30",
           "SOLID_QUEUE_SKIP_RECURRING" => "true",
           "SOLID_QUEUE_SUPERVISOR_MODE" => "async"
-        }
+        )
       end
 
       private

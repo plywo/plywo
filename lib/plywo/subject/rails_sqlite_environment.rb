@@ -15,11 +15,18 @@ module Plywo
         evidence.background_jobs
       ].freeze
 
-      def initialize(command_runner:, state_root: nil, bundle_path: nil, bundle_app_config: nil)
+      def initialize(
+        command_runner:,
+        state_root: nil,
+        bundle_path: nil,
+        bundle_app_config: nil,
+        runtime_env: {}
+      )
         @command_runner = command_runner
         @state_root = state_root && Pathname(state_root).expand_path
         @bundle_path = bundle_path && Pathname(bundle_path).expand_path.to_s
         @bundle_app_config = bundle_app_config && Pathname(bundle_app_config).expand_path.to_s
+        @runtime_env = runtime_env.transform_keys(&:to_s)
       end
 
       def capabilities
@@ -41,7 +48,7 @@ module Plywo
       end
 
       def env_for(root:, execution:, role:)
-        env = {
+        env = @runtime_env.merge(
           "BUNDLE_GEMFILE" => root.join("Gemfile").to_s,
           "DATABASE_URL" => nil,
           "SOLID_QUEUE_DATABASE_URL" => nil,
@@ -50,7 +57,7 @@ module Plywo
           "PLYWO_ASYNC_TRANSPORT" => "test_adapter",
           "PLYWO_QUIESCENCE_TIMEOUT_SECONDS" => "30",
           "PLYWO_QUIET_PERIOD_SECONDS" => "0.01"
-        }
+        )
         env["BUNDLE_PATH"] = @bundle_path if @bundle_path
         env["BUNDLE_APP_CONFIG"] = @bundle_app_config if @bundle_app_config
         env

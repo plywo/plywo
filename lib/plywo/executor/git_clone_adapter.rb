@@ -15,10 +15,16 @@ module Plywo
         @root = Pathname(root).expand_path
         @command_runner = command_runner
         @runner_factory = runner_factory || lambda do |repository_root:|
+          subject_bootstrap = Plywo::Subject::RailsBundleBootstrap.new(
+            command_runner: @command_runner,
+            cache_root: @root.join("tmp", "plywo", "bundles")
+          )
           Plywo::Github::LocalPullRequestRunner.new(
             root: repository_root,
             tool_root: @root,
-            fetch_repository: false
+            fetch_repository: false,
+            command_runner: @command_runner,
+            subject_bootstrap:
           )
         end
       end
