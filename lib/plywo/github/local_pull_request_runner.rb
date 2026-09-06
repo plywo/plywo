@@ -27,6 +27,7 @@ module Plywo
 
         def call(env:, command:, chdir:)
           stdout = stderr = status = nil
+          child_env = nil
 
           Bundler.with_unbundled_env do
             child_env = safe_inherited_environment.merge(env.transform_keys(&:to_s))
@@ -40,7 +41,11 @@ module Plywo
 
           return stdout if status.success?
 
-          raise Error, "Command failed (#{command.join(" ")}): #{stderr.presence || stdout}"
+          effective_env_keys = child_env.filter_map { |key, value| key if value }.sort
+          output = stderr.presence || stdout
+          raise Error,
+            "Command failed (#{command.join(" ")}): #{output}\n" \
+            "Effective environment keys: #{effective_env_keys.join(", ")}"
         end
 
         private
