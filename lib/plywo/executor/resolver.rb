@@ -5,11 +5,13 @@ module Plywo
 
       def self.from_env(root: ::Rails.root, env: ENV, rails_env: ::Rails.env)
         mode = env["PLYWO_EXECUTOR"] || env["PLYWO_GITHUB_EXECUTION_MODE"]
-        mode ||= rails_env.development? ? "local" : "disabled"
+        mode ||= rails_env.development? ? "git_clone" : "disabled"
 
         case mode
         when "local"
           LocalAdapter.new(root:)
+        when "git_clone"
+          authenticated_git_clone_adapter(root:)
         when "remote"
           remote_adapter(root:, env:)
         when "disabled"
@@ -18,6 +20,14 @@ module Plywo
           raise Error, "Unsupported PLYWO_EXECUTOR=#{mode.inspect}"
         end
       end
+
+      def self.authenticated_git_clone_adapter(root:)
+        GitCloneAdapter.new(
+          root:,
+          repository_capability_provider: Plywo::Github::RepositoryCapabilityProvider.new(root:)
+        )
+      end
+      private_class_method :authenticated_git_clone_adapter
 
       def self.remote_adapter(root:, env:)
         url = env["PLYWO_REMOTE_EXECUTOR_URL"].to_s

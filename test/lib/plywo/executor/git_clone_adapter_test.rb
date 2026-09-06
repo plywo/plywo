@@ -29,6 +29,20 @@ class PlywoExecutorGitCloneAdapterTest < ActiveSupport::TestCase
     end
   end
 
+  class CapabilityProvider
+    attr_reader :requests
+
+    def initialize(capability)
+      @capability = capability
+      @requests = []
+    end
+
+    def call(request:)
+      @requests << request
+      @capability
+    end
+  end
+
   test "clones through an ephemeral header capability without putting the token in git arguments" do
     command_runner = CommandRunner.new
     runner = Runner.new(result_payload)
@@ -59,6 +73,50 @@ class PlywoExecutorGitCloneAdapterTest < ActiveSupport::TestCase
     assert_includes fetch_call.fetch(:command), "+refs/heads/main:refs/remotes/origin/plywo-base"
     assert_includes fetch_call.fetch(:command), "+refs/pull/40/head:refs/remotes/origin/plywo-candidate"
     refute_predicate repository_roots.fetch(0), :exist?
+  end
+
+  test "resolves a repository capability through an injected provider" do
+    command_runner = CommandRunner.new
+    runner = Runner.new(result_payload)
+    capability = Plywo::Executor::RepositoryCapability.new(token: "provider-token")
+    provider = CapabilityProvider.new(capability)
+    adapter = Plywo::Executor::GitCloneAdapter.new(
+      root: Rails.root,
+      command_runner:,
+      runner_factory: ->(repository_root:) { runner },
+      repository_capability_provider: provider
+    )
+
+    result = adapter.call(request: executor_request)
+
+    assert result.success?
+    assert_equal [ executor_request ], provider.requests
+    fetch_call = command_runner.calls.find { |call| call.fetch(:command).take(2) == %w[git fetch] }
+    expected_basic = Base64.strict_encode64("x-access-token:provider-token")
+    assert_equal "AUTHORIZATION: basic #{expected_basic}", fetch_call.fetch(:env).fetch("GIT_CONFIG_VALUE_0")
+  end
+
+  test "explicit repository capability takes precedence over the provider" do
+    command_runner = CommandRunner.new
+    runner = Runner.new(result_payload)
+    provider = CapabilityProvider.new(Plywo::Executor::RepositoryCapability.new(token: "provider-token"))
+    adapter = Plywo::Executor::GitCloneAdapter.new(
+      root: Rails.root,
+      command_runner:,
+      runner_factory: ->(repository_root:) { runner },
+      repository_capability_provider: provider
+    )
+
+    result = adapter.call(
+      request: executor_request,
+      repository_capability: Plywo::Executor::RepositoryCapability.new(token: "explicit-token")
+    )
+
+    assert result.success?
+    assert_empty provider.requests
+    fetch_call = command_runner.calls.find { |call| call.fetch(:command).take(2) == %w[git fetch] }
+    expected_basic = Base64.strict_encode64("x-access-token:explicit-token")
+    assert_equal "AUTHORIZATION: basic #{expected_basic}", fetch_call.fetch(:env).fetch("GIT_CONFIG_VALUE_0")
   end
 
   test "fails closed when the repository capability is missing" do
