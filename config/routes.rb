@@ -6,6 +6,7 @@ Rails.application.routes.draw do
   get "ready" => "readiness#show", as: :readiness_check
 
   if runtime_role.control_plane?
+    get "/onboarding" => "onboarding#index", as: :onboarding
     get "/github/app/register" => "github/app_manifests#new", as: :github_app_register
     get "/github/app/manifest/callback" => "github/app_manifests#callback", as: :github_app_manifest_callback
     post "/github/webhooks" => "github/webhooks#create", as: :github_webhooks
