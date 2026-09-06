@@ -1,5 +1,6 @@
 require "base64"
 require "fileutils"
+require "tmpdir"
 
 module Plywo
   module Executor
@@ -9,11 +10,14 @@ module Plywo
 
       def initialize(
         root: ::Rails.root,
+        workspace_root: nil,
         command_runner: Plywo::Github::LocalPullRequestRunner::CommandRunner.new,
         runner_factory: nil,
         repository_capability_provider: nil
       )
         @root = Pathname(root).expand_path
+        @workspace_root = Pathname(workspace_root || File.join(Dir.tmpdir, "plywo", "repositories")).expand_path
+        assert_workspace_root_isolated!
         @command_runner = command_runner
         @repository_capability_provider = repository_capability_provider
         @runner_factory = runner_factory || lambda do |repository_root:|
@@ -100,7 +104,16 @@ module Plywo
 
       def repository_root(request:)
         suffix = request.execution_id.delete_prefix("github-")[0, 16]
-        @root.join("tmp", "plywo", "repositories", suffix)
+        @workspace_root.join(suffix)
+      end
+
+      def assert_workspace_root_isolated!
+        rails_ancestor = @workspace_root.ascend.find { |path| path.join("config.ru").file? }
+        return unless rails_ancestor
+
+        raise Error,
+          "Executor workspace root #{@workspace_root} is nested under Rails application #{rails_ancestor}; " \
+          "choose an isolated workspace root"
       end
 
       def run!(command:, chdir:, env: {})
