@@ -4,11 +4,26 @@ require "rbconfig"
 module Plywo
   module Subject
     class RailsSqliteEnvironment < Environment
+      CAPABILITIES = %w[
+        framework.rails
+        persistence.sqlite
+        queue.active_job_test_adapter
+        telemetry.subject_owned_rails
+        runtime.local_process
+        state.isolated_comparable
+        evidence.sql_queries
+        evidence.background_jobs
+      ].freeze
+
       def initialize(command_runner:, state_root: nil, bundle_path: nil, bundle_app_config: nil)
         @command_runner = command_runner
         @state_root = state_root && Pathname(state_root).expand_path
         @bundle_path = bundle_path && Pathname(bundle_path).expand_path.to_s
         @bundle_app_config = bundle_app_config && Pathname(bundle_app_config).expand_path.to_s
+      end
+
+      def capabilities
+        CAPABILITIES
       end
 
       def prepare(root:, execution:, role:)
