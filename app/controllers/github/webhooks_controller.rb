@@ -17,6 +17,7 @@ module Github
 
       body = JSON.parse(payload)
       delivery, enqueue = persist_delivery(event:, delivery_id:, body:)
+      settle_unapproved_execution_delivery!(delivery, event:, action: body["action"])
       settle_non_execution_delivery!(delivery, event:, action: body["action"])
       enqueue_delivery!(delivery:, enqueue:, event:, action: body["action"])
 
@@ -81,6 +82,7 @@ module Github
 
     def enqueue_delivery!(delivery:, enqueue:, event:, action:)
       return unless enqueue
+      return unless delivery.status == "accepted"
 
       if event == "pull_request"
         GithubPullRequestWebhookJob.perform_later(delivery.id)
@@ -89,12 +91,27 @@ module Github
       end
     end
 
+    def settle_unapproved_execution_delivery!(delivery, event:, action:)
+      return unless execution_trigger?(event:, action:)
+      return unless delivery.status == "accepted"
+      return if repository_admission_policy.allowed?(delivery.repository)
+
+      delivery.ignore!("repository_not_allowed")
+    end
+
     def settle_non_execution_delivery!(delivery, event:, action:)
-      return if event == "pull_request"
-      return if event == "check_run" && action == "rerequested"
+      return if execution_trigger?(event:, action:)
       return unless delivery.status == "accepted"
 
       delivery.ignore!("event_not_execution_trigger")
+    end
+
+    def execution_trigger?(event:, action:)
+      event == "pull_request" || (event == "check_run" && action == "rerequested")
+    end
+
+    def repository_admission_policy
+      @repository_admission_policy ||= Plywo::Github::RepositoryAdmissionPolicy.new
     end
   end
 end
