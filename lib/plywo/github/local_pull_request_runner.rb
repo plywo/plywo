@@ -101,36 +101,37 @@ module Plywo
           role: "base",
           configuration:
         ) do |baseline_subject|
-          @subject_lifecycle.open(
-            root: paths.fetch(:candidate_root),
+          capture_subject!(
             execution:,
-            role: "candidate",
-            configuration:
-          ) do |candidate_subject|
-            capture_subject!(
-              execution:,
-              root: paths.fetch(:baseline_root),
-              label: context.fetch("baseline_ref"),
-              sha: execution.baseline_sha,
-              environment: baseline_subject.env,
-              output: paths.fetch(:baseline_output)
-            )
-            capture_subject!(
-              execution:,
-              root: paths.fetch(:candidate_root),
-              label: context.fetch("candidate_ref"),
-              sha: execution.candidate_sha,
-              environment: candidate_subject.env,
-              output: paths.fetch(:candidate_output)
-            )
-
-            compare(
-              baseline_output: paths.fetch(:baseline_output),
-              candidate_output: paths.fetch(:candidate_output),
-              changed_paths: changed_paths(execution:)
-            )
-          end
+            root: paths.fetch(:baseline_root),
+            label: context.fetch("baseline_ref"),
+            sha: execution.baseline_sha,
+            environment: baseline_subject.env,
+            output: paths.fetch(:baseline_output)
+          )
         end
+
+        @subject_lifecycle.open(
+          root: paths.fetch(:candidate_root),
+          execution:,
+          role: "candidate",
+          configuration:
+        ) do |candidate_subject|
+          capture_subject!(
+            execution:,
+            root: paths.fetch(:candidate_root),
+            label: context.fetch("candidate_ref"),
+            sha: execution.candidate_sha,
+            environment: candidate_subject.env,
+            output: paths.fetch(:candidate_output)
+          )
+        end
+
+        compare(
+          baseline_output: paths.fetch(:baseline_output),
+          candidate_output: paths.fetch(:candidate_output),
+          changed_paths: changed_paths(execution:)
+        )
       ensure
         cleanup_worktree(paths&.fetch(:baseline_root, nil))
         cleanup_worktree(paths&.fetch(:candidate_root, nil))
