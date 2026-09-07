@@ -85,9 +85,15 @@ function rewriteWebhookPayload(event, payload) {
   if (
     event === "pull_request" &&
     payload.repository?.full_name === repository &&
-    payload.number &&
     payload.pull_request
   ) {
+    // emulate 0.11.1 omits GitHub's top-level `number` field from pull_request webhooks.
+    const pullNumber = payload.number ?? payload.pull_request.number;
+    if (!Number.isInteger(Number(pullNumber))) {
+      throw new Error("pull_request webhook is missing a numeric pull request number");
+    }
+
+    payload.number = Number(pullNumber);
     const mapping = rememberPullRequest(payload.number, payload);
     if (mapping) {
       payload.pull_request.base.sha = mapping.realBaseSha;
