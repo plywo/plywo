@@ -1,6 +1,13 @@
 name: Release image
 
 on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       release_sha:
@@ -17,23 +24,24 @@ permissions:
 
 jobs:
   image:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
+    env:
+      RELEASE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.release_sha || github.sha }}
     steps:
       - name: Checkout exact release source
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.release_sha || github.sha }}
+          ref: ${{ env.RELEASE_SHA }}
 
-      - name: Resolve release SHA
+      - name: Verify release SHA
         id: release
         shell: bash
-        env:
-          REQUESTED_SHA: ${{ inputs.release_sha }}
         run: |
           set -Eeuo pipefail
           sha="$(git rev-parse HEAD)"
-          if [[ -n "$REQUESTED_SHA" && "$sha" != "$REQUESTED_SHA" ]]; then
-            echo "checked out $sha but requested $REQUESTED_SHA" >&2
+          if [[ "$sha" != "$RELEASE_SHA" ]]; then
+            echo "checked out $sha but requested $RELEASE_SHA" >&2
             exit 1
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
