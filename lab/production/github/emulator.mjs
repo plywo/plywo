@@ -13,7 +13,7 @@ const seed = {
   tokens: {
     "lab-admin-token": {
       login: "admin",
-      scopes: ["repo", "user", "admin:org", "admin:repo_hook"],
+      scopes: ["repo", "user", "admin:repo_hook"],
     },
   },
   github: {
@@ -24,21 +24,15 @@ const seed = {
         email: "production-lab@plywo.local",
       },
     ],
-    orgs: [
-      {
-        login: "lab",
-        name: "Plywo Production Lab",
-      },
-    ],
     repos: [
       {
-        owner: "lab",
+        owner: "admin",
         name: "customer-rails",
         private: true,
         auto_init: true,
       },
       {
-        owner: "lab",
+        owner: "admin",
         name: "not-allowed",
         private: true,
         auto_init: true,
@@ -61,7 +55,7 @@ const seed = {
         installations: [
           {
             installation_id: installationId,
-            account: "lab",
+            account: "admin",
             repository_selection: "all",
           },
         ],
