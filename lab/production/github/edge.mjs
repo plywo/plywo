@@ -9,7 +9,7 @@ const controlPlaneWebhook =
 const webhookSecret = process.env.LAB_GITHUB_WEBHOOK_SECRET ?? "plywo-production-lab-webhook-secret";
 const statePath = process.env.PLYWO_LAB_SHA_STATE ?? "/lab-state/shas.json";
 const tlsRoot = process.env.PLYWO_LAB_TLS_ROOT ?? "/lab-tls";
-const repository = "lab/customer-rails";
+const repository = "admin/customer-rails";
 
 const pullRequestMappings = new Map();
 
@@ -118,7 +118,7 @@ function copyHeaders(source) {
 
 function rewriteApiPath(pathname) {
   const match = pathname.match(
-    /^\/repos\/lab\/customer-rails\/commits\/([^/]+)\/check-runs$/,
+    /^\/repos\/admin\/customer-rails\/commits\/([^/]+)\/check-runs$/,
   );
   if (!match) return pathname;
 
@@ -128,7 +128,7 @@ function rewriteApiPath(pathname) {
 }
 
 function rewriteRequestBody(method, pathname, rawBody) {
-  if (method !== "POST" || pathname !== "/repos/lab/customer-rails/check-runs" || rawBody.length === 0) {
+  if (method !== "POST" || pathname !== "/repos/admin/customer-rails/check-runs" || rawBody.length === 0) {
     return rawBody;
   }
 
@@ -138,7 +138,7 @@ function rewriteRequestBody(method, pathname, rawBody) {
 }
 
 function rewritePullRequestResponse(pathname, contentType, body) {
-  const match = pathname.match(/^\/repos\/lab\/customer-rails\/pulls\/(\d+)$/);
+  const match = pathname.match(/^\/repos\/admin\/customer-rails\/pulls\/(\d+)$/);
   if (!match || !contentType.includes("application/json") || body.length === 0) return body;
 
   const mapping = mappingForNumber(Number(match[1]));
