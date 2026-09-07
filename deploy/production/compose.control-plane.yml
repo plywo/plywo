@@ -1,0 +1,19 @@
+services:
+  plywo:
+    image: ghcr.io/plywo/plywo:${PLYWO_IMAGE_TAG:?set PLYWO_IMAGE_TAG to an immutable release or sha tag}
+    restart: unless-stopped
+    env_file:
+      - .env.control-plane
+    volumes:
+      - ./.secrets/plywo-github-private-key.pem:/run/secrets/plywo-github-private-key.pem:ro
+    expose:
+      - "3000"
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    env_file:
+      - .env.control-plane.tunnel
+    command: tunnel --no-autoupdate run
+    depends_on:
+      - plywo
