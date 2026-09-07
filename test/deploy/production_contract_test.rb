@@ -8,7 +8,7 @@ class ProductionDeploymentContractTest < ActiveSupport::TestCase
     compose = YAML.safe_load(ROOT.join("compose.control-plane.yml").read)
     services = compose.fetch("services")
 
-    assert_equal ["3000"], services.dig("plywo", "expose")
+    assert_equal [ "3000" ], services.dig("plywo", "expose")
     assert_nil services.dig("plywo", "ports")
     assert_includes services.dig("plywo", "volumes"), "./.secrets:/run/secrets:ro"
     assert_equal "bin/rails db:prepare", services.dig("migrate", "command")
@@ -21,7 +21,7 @@ class ProductionDeploymentContractTest < ActiveSupport::TestCase
     compose = YAML.safe_load(ROOT.join("compose.executor.yml").read)
     services = compose.fetch("services")
 
-    assert_equal ["3000"], services.dig("plywo", "expose")
+    assert_equal [ "3000" ], services.dig("plywo", "expose")
     assert_nil services.dig("plywo", "ports")
     assert_nil services.dig("postgres", "ports")
     assert_equal "bin/rails db:prepare", services.dig("migrate", "command")
