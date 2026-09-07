@@ -28,7 +28,7 @@ module Plywo
               operation: "rails.db_prepare",
               provenance: "detected",
               details: {
-                command: [ "bin/rails", "db:prepare" ],
+                task: "db:prepare",
                 persistence_mode: configuration.persistence
               }
             },
