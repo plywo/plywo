@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SOURCE_DIR="$ROOT_DIR/deploy/production"
+ROLE="${1:-}"
+DEST_DIR="${2:-$SOURCE_DIR}"
+
+usage() {
+  echo "usage: bin/init-production-role <control-plane|executor> [destination-directory]" >&2
+  exit 64
+}
+
+[[ "$ROLE" == "control-plane" || "$ROLE" == "executor" ]] || usage
+
+mkdir -p "$DEST_DIR"
+
+copy_once() {
+  local source_name="$1"
+  local destination_name="$2"
+  local source="$SOURCE_DIR/$source_name"
+  local destination="$DEST_DIR/$destination_name"
+
+  if [[ -e "$destination" ]]; then
+    printf 'keep %s (already exists)\n' "$destination"
+    return
+  fi
+
+  cp "$source" "$destination"
+  chmod 600 "$destination"
+  printf 'create %s\n' "$destination"
+}
+
+copy_once images.env.example .env
+
+case "$ROLE" in
+  control-plane)
+    copy_once control-plane.env.example .env.control-plane
+    copy_once tunnel.env.example .env.control-plane.tunnel
+    mkdir -p "$DEST_DIR/.secrets"
+    chmod 700 "$DEST_DIR/.secrets"
+    ;;
+  executor)
+    copy_once executor.env.example .env.executor
+    copy_once executor-postgres.env.example .env.executor.postgres
+    copy_once tunnel.env.example .env.executor.tunnel
+    ;;
+esac
+
+cat <<EOF
+
+Initialized $ROLE production files in:
+  $DEST_DIR
+
+No existing file was overwritten. Fill every required blank value before deployment.
+EOF
