@@ -12,14 +12,24 @@ services:
       timeout: 5s
       retries: 20
 
+  migrate:
+    image: ghcr.io/plywo/plywo:${PLYWO_IMAGE_TAG:?set PLYWO_IMAGE_TAG to an immutable release or sha tag}
+    env_file:
+      - .env.executor
+    command: bin/rails db:prepare
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   plywo:
     image: ghcr.io/plywo/plywo:${PLYWO_IMAGE_TAG:?set PLYWO_IMAGE_TAG to an immutable release or sha tag}
     restart: unless-stopped
     env_file:
       - .env.executor
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     expose:
       - "3000"
 
