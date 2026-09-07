@@ -82,7 +82,12 @@ function validSignature(body, supplied) {
 }
 
 function rewriteWebhookPayload(event, payload) {
-  if (event === "pull_request" && payload.number && payload.pull_request) {
+  if (
+    event === "pull_request" &&
+    payload.repository?.full_name === repository &&
+    payload.number &&
+    payload.pull_request
+  ) {
     const mapping = rememberPullRequest(payload.number, payload);
     if (mapping) {
       payload.pull_request.base.sha = mapping.realBaseSha;
@@ -90,7 +95,11 @@ function rewriteWebhookPayload(event, payload) {
     }
   }
 
-  if (event === "check_run" && payload.check_run?.head_sha) {
+  if (
+    event === "check_run" &&
+    payload.repository?.full_name === repository &&
+    payload.check_run?.head_sha
+  ) {
     payload.check_run.head_sha = realShaForEmulatorSha(payload.check_run.head_sha);
   }
 
