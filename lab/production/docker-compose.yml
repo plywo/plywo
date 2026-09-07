@@ -6,6 +6,12 @@ x-plywo-image: &plywo-image
     context: ../..
     dockerfile: Dockerfile
 
+x-github-image: &github-image
+  image: plywo-production-lab-github:local
+  build:
+    context: ../..
+    dockerfile: lab/production/github/Dockerfile
+
 x-control-plane-environment: &control-plane-environment
   RAILS_ENV: production
   SECRET_KEY_BASE: production-lab-control-plane-secret-key-base
@@ -65,10 +71,7 @@ services:
       - lab-git:/usr/share/nginx/html:ro
 
   github-emulator:
-    build:
-      context: ../..
-      dockerfile: lab/production/github/Dockerfile
-    image: plywo-production-lab-github:local
+    <<: *github-image
     depends_on:
       prepare:
         condition: service_completed_successfully
@@ -88,7 +91,7 @@ services:
       retries: 60
 
   github-edge:
-    image: plywo-production-lab-github:local
+    <<: *github-image
     depends_on:
       prepare:
         condition: service_completed_successfully
@@ -152,7 +155,7 @@ services:
       github-emulator:
         condition: service_healthy
     environment: *control-plane-environment
-    command: bin/jobs
+    command: ruby bin/jobs
     volumes:
       - lab-state:/lab-state:ro
       - lab-tls:/lab-tls:ro
