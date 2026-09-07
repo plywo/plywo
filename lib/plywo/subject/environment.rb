@@ -27,6 +27,18 @@ module Plywo
         raise NotImplementedError
       end
 
+      def start_services(root:, execution:, role:, env:)
+        nil
+      end
+
+      def healthcheck(root:, execution:, role:, env:)
+        nil
+      end
+
+      def stop_services(root:, execution:, role:, env:)
+        nil
+      end
+
       def cleanup(root:, execution:, role:)
         nil
       end
