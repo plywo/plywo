@@ -77,6 +77,7 @@ module Plywo
         require_value!(errors, "PLYWO_GITHUB_APP_ID")
         require_value!(errors, "PLYWO_GITHUB_WEBHOOK_SECRET")
         require_readable_file!(errors, "PLYWO_GITHUB_PRIVATE_KEY_PATH")
+        validate_repository_admission!(errors)
 
         unless @env["PLYWO_EXECUTOR"].to_s == "remote"
           errors << "PLYWO_EXECUTOR must be remote for a production control plane"
@@ -84,6 +85,19 @@ module Plywo
 
         require_https!(errors, "PLYWO_REMOTE_EXECUTOR_URL")
         require_value!(errors, "PLYWO_REMOTE_EXECUTOR_TOKEN")
+      end
+
+      def validate_repository_admission!(errors)
+        policy = Plywo::Github::RepositoryAdmissionPolicy.new(env: @env, rails_env: @rails_env)
+
+        unless policy.configured?
+          errors << "PLYWO_GITHUB_REPOSITORY_ALLOWLIST is required for a production control plane"
+          return
+        end
+
+        if policy.wildcard?
+          errors << "PLYWO_GITHUB_REPOSITORY_ALLOWLIST must not contain * in production"
+        end
       end
 
       def validate_executor_service!(errors)

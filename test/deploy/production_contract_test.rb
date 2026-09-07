@@ -44,13 +44,14 @@ class ProductionDeploymentContractTest < ActiveSupport::TestCase
     assert_match(/^PLYWO_EXECUTOR_SERVICE_ADAPTER=git_clone$/, env)
   end
 
-  test "control-plane environment example requires remote execution and production app identity" do
+  test "control-plane environment example requires remote execution, repository admission, and production app identity" do
     env = ROOT.join("control-plane.env.example").read
 
     assert_match(/^SECRET_KEY_BASE=$/, env)
     assert_match(/^PLYWO_RUNTIME_ROLE=control_plane$/, env)
     assert_match(/^PLYWO_GITHUB_APP_MANIFEST_ENV=production$/, env)
     assert_match(/^PLYWO_GITHUB_APP_SLUG=plywo$/, env)
+    assert_match(/^PLYWO_GITHUB_REPOSITORY_ALLOWLIST=external-owner\/proof-repository$/, env)
     assert_match(/^PLYWO_ENABLE_GITHUB_APP_REGISTRATION=0$/, env)
     assert_match(/^PLYWO_EXECUTOR=remote$/, env)
     assert_match(%r{^PLYWO_REMOTE_EXECUTOR_URL=https://}, env)
