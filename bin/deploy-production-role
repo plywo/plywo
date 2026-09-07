@@ -24,6 +24,11 @@ case "$ROLE" in
     ;;
 esac
 
+if [[ ! -f "$DEPLOY_DIR/$COMPOSE_FILE" ]]; then
+  echo "missing production compose file: $DEPLOY_DIR/$COMPOSE_FILE" >&2
+  exit 66
+fi
+
 for file in "${REQUIRED_FILES[@]}"; do
   if [[ ! -f "$DEPLOY_DIR/$file" ]]; then
     echo "missing required deployment file: $DEPLOY_DIR/$file" >&2
