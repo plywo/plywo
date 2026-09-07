@@ -34,6 +34,34 @@ class Plywo::Runtime::ReadinessTest < ActiveSupport::TestCase
     end
   end
 
+  test "production control plane requires a repository allowlist" do
+    Dir.mktmpdir("plywo-readiness-") do |root|
+      File.write(File.join(root, "github.pem"), "private-key-placeholder")
+      env = control_plane_env.merge("PLYWO_GITHUB_PRIVATE_KEY_PATH" => "github.pem")
+      env.delete("PLYWO_GITHUB_REPOSITORY_ALLOWLIST")
+
+      result = readiness(root:, env:).call
+
+      assert_not result.ready?
+      assert_includes result.errors, "PLYWO_GITHUB_REPOSITORY_ALLOWLIST is required for a production control plane"
+    end
+  end
+
+  test "production control plane rejects wildcard repository admission" do
+    Dir.mktmpdir("plywo-readiness-") do |root|
+      File.write(File.join(root, "github.pem"), "private-key-placeholder")
+      env = control_plane_env.merge(
+        "PLYWO_GITHUB_PRIVATE_KEY_PATH" => "github.pem",
+        "PLYWO_GITHUB_REPOSITORY_ALLOWLIST" => "*"
+      )
+
+      result = readiness(root:, env:).call
+
+      assert_not result.ready?
+      assert_includes result.errors, "PLYWO_GITHUB_REPOSITORY_ALLOWLIST must not contain * in production"
+    end
+  end
+
   test "production executor service is ready with git clone and no GitHub App secrets" do
     result = readiness(
       env: {
@@ -106,6 +134,7 @@ class Plywo::Runtime::ReadinessTest < ActiveSupport::TestCase
       "PLYWO_PUBLIC_URL" => "https://plywo.example.test",
       "PLYWO_GITHUB_APP_ID" => "12345",
       "PLYWO_GITHUB_WEBHOOK_SECRET" => "webhook-secret",
+      "PLYWO_GITHUB_REPOSITORY_ALLOWLIST" => "customer/app",
       "PLYWO_EXECUTOR" => "remote",
       "PLYWO_REMOTE_EXECUTOR_URL" => "https://executor.example.test/v1/executions",
       "PLYWO_REMOTE_EXECUTOR_TOKEN" => "service-secret"
