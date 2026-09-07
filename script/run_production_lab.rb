@@ -14,8 +14,8 @@ module PlywoProductionLab
   EXECUTOR_URL = ENV.fetch("PLYWO_LAB_EXECUTOR_URL", "https://executor-tls:4443")
   ADMIN_TOKEN = ENV.fetch("PLYWO_LAB_GITHUB_ADMIN_TOKEN", "lab-admin-token")
   CHECK_NAME = ENV.fetch("PLYWO_GITHUB_APP_CHECK_NAME", "Plywo Lab / Behavioral Diff")
-  CUSTOMER_REPOSITORY = "lab/customer-rails"
-  DISALLOWED_REPOSITORY = "lab/not-allowed"
+  CUSTOMER_REPOSITORY = "admin/customer-rails"
+  DISALLOWED_REPOSITORY = "admin/not-allowed"
   TIMEOUT_SECONDS = Integer(ENV.fetch("PLYWO_LAB_TIMEOUT_SECONDS", "300"))
 
   module_function
