@@ -7,6 +7,7 @@ const upstream = process.env.GITHUB_EMULATOR_URL ?? "http://github-emulator:4001
 const controlPlaneWebhook =
   process.env.PLYWO_CONTROL_PLANE_WEBHOOK_URL ?? "https://control-plane-tls:4444/github/webhooks";
 const webhookSecret = process.env.LAB_GITHUB_WEBHOOK_SECRET ?? "plywo-production-lab-webhook-secret";
+const adminToken = process.env.PLYWO_LAB_GITHUB_ADMIN_TOKEN ?? "lab-admin-token";
 const statePath = process.env.PLYWO_LAB_SHA_STATE ?? "/lab-state/shas.json";
 const tlsRoot = process.env.PLYWO_LAB_TLS_ROOT ?? "/lab-tls";
 const repository = "admin/customer-rails";
@@ -81,19 +82,52 @@ function validSignature(body, supplied) {
   return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 }
 
-function rewriteWebhookPayload(event, payload) {
+async function fetchLatestPullRequest() {
+  const target = new URL(`/repos/${repository}/pulls?state=open&per_page=100`, upstream);
+  const response = await fetch(target, {
+    headers: {
+      authorization: `Bearer ${adminToken}`,
+      accept: "application/vnd.github+json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`failed to hydrate pull_request webhook: HTTP ${response.status}`);
+  }
+
+  const pulls = await response.json();
+  const latest = pulls
+    .filter((pull) => Number.isInteger(Number(pull.number)))
+    .sort((left, right) => Number(right.number) - Number(left.number))[0];
+
+  if (!latest) {
+    throw new Error("failed to hydrate pull_request webhook: no open pull request found");
+  }
+
+  return latest;
+}
+
+async function rewriteWebhookPayload(event, payload) {
   if (
     event === "pull_request" &&
-    payload.repository?.full_name === repository &&
-    payload.pull_request
+    payload.repository?.full_name === repository
   ) {
-    // emulate 0.11.1 omits GitHub's top-level `number` field from pull_request webhooks.
-    const pullNumber = payload.number ?? payload.pull_request.number;
+    let pullRequest = payload.pull_request;
+    let pullNumber = payload.number ?? pullRequest?.number;
+
+    if (!pullRequest || !Number.isInteger(Number(pullNumber))) {
+      const hydrated = await fetchLatestPullRequest();
+      pullRequest = { ...hydrated, ...(pullRequest ?? {}) };
+      pullNumber = payload.number ?? pullRequest.number;
+    }
+
     if (!Number.isInteger(Number(pullNumber))) {
       throw new Error("pull_request webhook is missing a numeric pull request number");
     }
 
     payload.number = Number(pullNumber);
+    payload.pull_request = pullRequest;
+
     const mapping = rememberPullRequest(payload.number, payload);
     if (mapping) {
       payload.pull_request.base.sha = mapping.realBaseSha;
@@ -165,7 +199,7 @@ async function handleWebhook(request, response, rawBody) {
   }
 
   const event = String(request.headers["x-github-event"] ?? "");
-  const payload = rewriteWebhookPayload(event, JSON.parse(rawBody.toString("utf8")));
+  const payload = await rewriteWebhookPayload(event, JSON.parse(rawBody.toString("utf8")));
   const forwardedBody = Buffer.from(JSON.stringify(payload));
   const forwarded = await fetch(controlPlaneWebhook, {
     method: "POST",
