@@ -7,7 +7,7 @@ module Plywo
     class PullRequestClient
       Error = Class.new(StandardError)
 
-      def initialize(token:, api_url: "https://api.github.com")
+      def initialize(token:, api_url: ENV.fetch("GITHUB_API_URL", "https://api.github.com"))
         @token = token
         @api_url = api_url.sub(%r{/+$}, "")
       end

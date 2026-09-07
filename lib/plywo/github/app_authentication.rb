@@ -16,7 +16,8 @@ module Plywo
 
         new(
           app_id: ENV.fetch("PLYWO_GITHUB_APP_ID"),
-          private_key_path:
+          private_key_path:,
+          api_url: ENV.fetch("GITHUB_API_URL", "https://api.github.com")
         )
       end
 

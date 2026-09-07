@@ -1,6 +1,7 @@
 require "base64"
 require "fileutils"
 require "tmpdir"
+require "uri"
 
 module Plywo
   module Executor
@@ -13,13 +14,15 @@ module Plywo
         workspace_root: nil,
         command_runner: Plywo::Github::LocalPullRequestRunner::CommandRunner.new,
         runner_factory: nil,
-        repository_capability_provider: nil
+        repository_capability_provider: nil,
+        git_base_url: ENV.fetch("PLYWO_GITHUB_GIT_BASE_URL", "https://github.com")
       )
         @root = Pathname(root).expand_path
         @workspace_root = Pathname(workspace_root || File.join(Dir.tmpdir, "plywo", "repositories")).expand_path
         assert_workspace_root_isolated!
         @command_runner = command_runner
         @repository_capability_provider = repository_capability_provider
+        @git_base_url = normalize_git_base_url(git_base_url)
         @runner_factory = runner_factory || lambda do |repository_root:|
           subject_bootstrap = Plywo::Subject::RailsBundleBootstrap.new(
             command_runner: @command_runner,
@@ -74,7 +77,7 @@ module Plywo
 
         run!(command: [ "git", "init", repository_root.to_s ], chdir: @root)
         run!(
-          command: [ "git", "remote", "add", "origin", "https://github.com/#{repository}.git" ],
+          command: [ "git", "remote", "add", "origin", repository_url(repository) ],
           chdir: repository_root
         )
         run!(
@@ -97,9 +100,24 @@ module Plywo
         {
           "GIT_TERMINAL_PROMPT" => "0",
           "GIT_CONFIG_COUNT" => "1",
-          "GIT_CONFIG_KEY_0" => "http.https://github.com/.extraheader",
+          "GIT_CONFIG_KEY_0" => "http.#{@git_base_url}/.extraheader",
           "GIT_CONFIG_VALUE_0" => "AUTHORIZATION: basic #{basic}"
         }
+      end
+
+      def repository_url(repository)
+        "#{@git_base_url}/#{repository}.git"
+      end
+
+      def normalize_git_base_url(value)
+        uri = URI.parse(value.to_s.sub(%r{/+$}, ""))
+        unless %w[http https].include?(uri.scheme) && uri.host.present?
+          raise Error, "Git base URL must be an absolute HTTP(S) URL"
+        end
+
+        uri.to_s.sub(%r{/+$}, "")
+      rescue URI::InvalidURIError
+        raise Error, "Git base URL must be an absolute HTTP(S) URL"
       end
 
       def repository_root(request:)
