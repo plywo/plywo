@@ -15,4 +15,5 @@ Read in this order:
 11. `rfcs/0002-runner-adapter-contract.md`
 12. `rfcs/0003-one-baseline-many-candidates.md`
 13. `rfcs/0004-compute-and-executor-strategy.md`
-14. `roadmap.md`
+14. `rfcs/0005-differential-mutation-evidence.md`
+15. `roadmap.md`
