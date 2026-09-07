@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+CONTROL_PLANE_URL="${1:-${PLYWO_CONTROL_PLANE_URL:-}}"
+EXECUTOR_URL="${2:-${PLYWO_EXECUTOR_URL:-}}"
+
+if [[ -z "$CONTROL_PLANE_URL" || -z "$EXECUTOR_URL" ]]; then
+  echo "usage: bin/verify-production-topology https://app.example.com https://executor.example.com" >&2
+  exit 64
+fi
+
+CONTROL_PLANE_URL="${CONTROL_PLANE_URL%/}"
+EXECUTOR_URL="${EXECUTOR_URL%/}"
+
+check_ready() {
+  local url="$1"
+  local expected_role="$2"
+  local body
+
+  curl -fsS "${url}/up" >/dev/null
+  body="$(curl -fsS "${url}/ready")"
+
+  ruby -rjson -e '
+    payload = JSON.parse(ARGV.fetch(0))
+    expected_role = ARGV.fetch(1)
+    unless payload["status"] == "ready" && payload["role"] == expected_role && payload["errors"] == []
+      warn "unexpected readiness payload: #{payload.inspect}"
+      exit 1
+    end
+  ' "$body" "$expected_role"
+
+  printf '%s ready (%s)\n' "$url" "$expected_role"
+}
+
+check_ready "$CONTROL_PLANE_URL" control_plane
+check_ready "$EXECUTOR_URL" executor_service
+curl -fsS "${CONTROL_PLANE_URL}/onboarding" >/dev/null
+printf '%s onboarding ready\n' "$CONTROL_PLANE_URL"
