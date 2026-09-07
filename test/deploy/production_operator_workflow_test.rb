@@ -127,6 +127,18 @@ class ProductionOperatorWorkflowTest < ActiveSupport::TestCase
     end
   end
 
+  test "release workflow publishes the exact head only after successful main CI" do
+    workflow = ROOT.join(".github/workflows/release-image.yml").read
+
+    assert_includes workflow, "workflow_run:"
+    assert_includes workflow, "      - CI"
+    assert_includes workflow, "      - main"
+    assert_includes workflow, "github.event.workflow_run.conclusion == 'success'"
+    assert_includes workflow, "github.event.workflow_run.head_sha"
+    assert_includes workflow, 'ref: ${{ env.RELEASE_SHA }}'
+    assert_includes workflow, 'type=raw,value=sha-${{ steps.release.outputs.sha }}'
+  end
+
   private
 
   def run_script(name, *args, env: {})
