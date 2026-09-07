@@ -10,7 +10,7 @@ services:
       - "3000"
 
   tunnel:
-    image: cloudflare/cloudflared:latest
+    image: ${PLYWO_CLOUDFLARED_IMAGE:?set PLYWO_CLOUDFLARED_IMAGE to an immutable cloudflared image reference}
     restart: unless-stopped
     env_file:
       - .env.control-plane.tunnel
