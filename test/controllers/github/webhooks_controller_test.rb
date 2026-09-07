@@ -61,6 +61,57 @@ class GithubWebhooksControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "persists but does not enqueue a pull request outside the configured allowlist" do
+    with_webhook_secret do
+      with_repository_allowlist("approved/customer-app") do
+        payload = JSON.generate(
+          "action" => "synchronize",
+          "number" => 20,
+          "installation" => { "id" => 158_885_061 },
+          "repository" => { "full_name" => "unapproved/customer-app" },
+          "pull_request" => {
+            "base" => { "sha" => "base-sha" },
+            "head" => { "sha" => "head-sha" }
+          }
+        )
+
+        assert_no_enqueued_jobs do
+          post_signed_webhook(payload:, event: "pull_request", delivery: "delivery-pr-denied")
+          post_signed_webhook(payload:, event: "pull_request", delivery: "delivery-pr-denied")
+        end
+
+        assert_response :accepted
+        delivery = GithubWebhookDelivery.find_by!(delivery_id: "delivery-pr-denied")
+        assert_equal "ignored", delivery.status
+        assert_equal "repository_not_allowed", delivery.failure
+      end
+    end
+  end
+
+  test "configured allowlist permits an exact pull request repository" do
+    with_webhook_secret do
+      with_repository_allowlist("approved/customer-app") do
+        payload = JSON.generate(
+          "action" => "synchronize",
+          "number" => 21,
+          "installation" => { "id" => 158_885_061 },
+          "repository" => { "full_name" => "approved/customer-app" },
+          "pull_request" => {
+            "base" => { "sha" => "base-sha" },
+            "head" => { "sha" => "head-sha" }
+          }
+        )
+
+        assert_enqueued_with(job: GithubPullRequestWebhookJob) do
+          post_signed_webhook(payload:, event: "pull_request", delivery: "delivery-pr-allowed")
+        end
+
+        delivery = GithubWebhookDelivery.find_by!(delivery_id: "delivery-pr-allowed")
+        assert_equal "accepted", delivery.status
+      end
+    end
+  end
+
   test "settles completed check runs as ignored" do
     with_webhook_secret do
       payload = JSON.generate(
@@ -102,6 +153,30 @@ class GithubWebhooksControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "does not enqueue a rerequested check run outside the configured allowlist" do
+    with_webhook_secret do
+      with_repository_allowlist("approved/customer-app") do
+        payload = JSON.generate(
+          "action" => "rerequested",
+          "installation" => { "id" => 158_885_061 },
+          "repository" => { "full_name" => "unapproved/customer-app" },
+          "check_run" => {
+            "head_sha" => "head-sha",
+            "external_id" => "github-execution-denied"
+          }
+        )
+
+        assert_no_enqueued_jobs do
+          post_signed_webhook(payload:, event: "check_run", delivery: "delivery-check-run-denied")
+        end
+
+        delivery = GithubWebhookDelivery.find_by!(delivery_id: "delivery-check-run-denied")
+        assert_equal "ignored", delivery.status
+        assert_equal "repository_not_allowed", delivery.failure
+      end
+    end
+  end
+
   test "rejects an unsigned webhook" do
     with_webhook_secret do
       post github_webhooks_url,
@@ -124,6 +199,14 @@ class GithubWebhooksControllerTest < ActionDispatch::IntegrationTest
     yield
   ensure
     ENV["PLYWO_GITHUB_WEBHOOK_SECRET"] = previous_secret
+  end
+
+  def with_repository_allowlist(value)
+    previous_allowlist = ENV["PLYWO_GITHUB_REPOSITORY_ALLOWLIST"]
+    ENV["PLYWO_GITHUB_REPOSITORY_ALLOWLIST"] = value
+    yield
+  ensure
+    ENV["PLYWO_GITHUB_REPOSITORY_ALLOWLIST"] = previous_allowlist
   end
 
   def post_signed_webhook(payload:, event:, delivery:)
