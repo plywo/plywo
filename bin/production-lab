@@ -17,6 +17,7 @@ dump_failure_state() {
         action: delivery.action,
         repository: delivery.repository,
         pull_request_number: delivery.pull_request_number,
+        installation_id: delivery.installation_id,
         status: delivery.status,
         failure: delivery.failure&.gsub(/Bearer\s+\S+/i, "Bearer [REDACTED]")
       }
@@ -30,11 +31,15 @@ dump_failure_state() {
         failure: execution.failure&.gsub(/Bearer\s+\S+/i, "Bearer [REDACTED]")
       }
     end
+    failed_queue_errors = SolidQueue::FailedExecution.order(:id).pluck(:error).map do |error|
+      error&.gsub(/Bearer\s+\S+/i, "Bearer [REDACTED]")
+    end
     queue = {
       jobs: SolidQueue::Job.count,
       ready: SolidQueue::ReadyExecution.count,
       claimed: SolidQueue::ClaimedExecution.count,
-      failed: SolidQueue::FailedExecution.count
+      failed: SolidQueue::FailedExecution.count,
+      failed_errors: failed_queue_errors
     }
 
     puts "production_lab_deliveries=#{deliveries.to_json}"
@@ -44,7 +49,7 @@ dump_failure_state() {
 
   echo "=== production lab application log ===" >&2
   "${COMPOSE[@]}" exec -T control-plane sh -lc '
-    if [[ -f log/production.log ]]; then
+    if [ -f log/production.log ]; then
       grep -E "Plywo|GithubPullRequest|GithubWebhook|SolidQueue|ERROR|Error|exception|Exception" log/production.log | tail -n 240
     fi
   ' || true
