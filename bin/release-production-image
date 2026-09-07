@@ -16,11 +16,15 @@ if [[ ! "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
   exit 65
 fi
 
-gh workflow run release-image.yml --repo "$REPOSITORY" --ref "$SHA"
+gh workflow run release-image.yml \
+  --repo "$REPOSITORY" \
+  --ref "$REF" \
+  -f "release_sha=$SHA"
 
 cat <<EOF
 Release image workflow dispatched for:
   repository: $REPOSITORY
+  dispatch ref: $REF
   commit:     $SHA
   image tag:  sha-$SHA
 
