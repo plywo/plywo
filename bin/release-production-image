@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+REF="${1:-main}"
+REPOSITORY="${PLYWO_GITHUB_REPOSITORY:-plywo/plywo}"
+
+if ! command -v gh >/dev/null 2>&1; then
+  echo "GitHub CLI (gh) is required" >&2
+  exit 69
+fi
+
+SHA="$(gh api "repos/$REPOSITORY/commits/$REF" --jq .sha)"
+
+if [[ ! "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "could not resolve an exact commit SHA for $REPOSITORY@$REF" >&2
+  exit 65
+fi
+
+gh workflow run release-image.yml \
+  --repo "$REPOSITORY" \
+  --ref "$REF" \
+  -f "release_sha=$SHA"
+
+cat <<EOF
+Release image workflow dispatched for:
+  repository: $REPOSITORY
+  dispatch ref: $REF
+  commit:     $SHA
+  image tag:  sha-$SHA
+
+Watch it with:
+  gh run list --repo $REPOSITORY --workflow release-image.yml --commit $SHA
+EOF

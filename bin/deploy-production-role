@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEPLOY_DIR="${PLYWO_PRODUCTION_DEPLOY_DIR:-$ROOT_DIR/deploy/production}"
+ROLE="${1:-}"
+ACTION="${2:-deploy}"
+
+usage() {
+  echo "usage: bin/deploy-production-role <control-plane|executor> [deploy|pull|up|status|logs|config]" >&2
+  exit 64
+}
+
+[[ "$ROLE" == "control-plane" || "$ROLE" == "executor" ]] || usage
+
+case "$ROLE" in
+  control-plane)
+    COMPOSE_FILE="compose.control-plane.yml"
+    REQUIRED_FILES=(.env .env.control-plane .env.control-plane.tunnel)
+    ;;
+  executor)
+    COMPOSE_FILE="compose.executor.yml"
+    REQUIRED_FILES=(.env .env.executor .env.executor.postgres .env.executor.tunnel)
+    ;;
+esac
+
+if [[ ! -f "$DEPLOY_DIR/$COMPOSE_FILE" ]]; then
+  echo "missing production compose file: $DEPLOY_DIR/$COMPOSE_FILE" >&2
+  exit 66
+fi
+
+for file in "${REQUIRED_FILES[@]}"; do
+  if [[ ! -f "$DEPLOY_DIR/$file" ]]; then
+    echo "missing required deployment file: $DEPLOY_DIR/$file" >&2
+    echo "run bin/init-production-role $ROLE first" >&2
+    exit 66
+  fi
+done
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "docker is required" >&2
+  exit 69
+fi
+
+if ! docker compose version >/dev/null 2>&1; then
+  echo "Docker Compose v2 is required (docker compose)" >&2
+  exit 69
+fi
+
+COMPOSE=(
+  docker compose
+  --project-directory "$DEPLOY_DIR"
+  --env-file "$DEPLOY_DIR/.env"
+  -f "$DEPLOY_DIR/$COMPOSE_FILE"
+)
+
+validate_compose() {
+  "${COMPOSE[@]}" config --quiet
+}
+
+case "$ACTION" in
+  deploy)
+    validate_compose
+    "${COMPOSE[@]}" pull
+    "${COMPOSE[@]}" up -d --remove-orphans
+    "${COMPOSE[@]}" ps
+    ;;
+  pull)
+    validate_compose
+    "${COMPOSE[@]}" pull
+    ;;
+  up)
+    validate_compose
+    "${COMPOSE[@]}" up -d --remove-orphans
+    "${COMPOSE[@]}" ps
+    ;;
+  status)
+    "${COMPOSE[@]}" ps
+    ;;
+  logs)
+    "${COMPOSE[@]}" logs --tail=200
+    ;;
+  config)
+    "${COMPOSE[@]}" config
+    ;;
+  *)
+    usage
+    ;;
+esac

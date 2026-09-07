@@ -28,15 +28,47 @@ The product boundary already requires isolation, but the first production proof 
 
 Do not deploy `PLYWO_RUNTIME_ROLE=combined` in production; `/ready` rejects it.
 
-## Immutable image inputs
+## Operator quick path
 
-On each host copy:
+The first production proof is operated through three repository entrypoints:
 
-```text
-images.env.example -> .env
+```bash
+bash bin/release-production-image main
+bash bin/init-production-role <control-plane|executor>
+bash bin/deploy-production-role <control-plane|executor> deploy
 ```
 
-Fill immutable references:
+`release-production-image` resolves the selected ref to an exact Git commit before dispatching the GHCR workflow and prints the immutable image tag `sha-<full-git-sha>`.
+
+On both production hosts, check out that same release commit before initializing/deploying. The checked-out compose contract and the running image must describe the same revision.
+
+`init-production-role` creates the required local env files from the committed examples with mode `0600`, never overwrites an existing file, and creates the control-plane `.secrets` directory with mode `0700`.
+
+`deploy-production-role` validates required local files and Docker Compose configuration, then performs deterministic `pull`, `up -d --remove-orphans`, and `ps` operations. It also supports `pull`, `up`, `status`, `logs`, and `config` as explicit actions.
+
+Host prerequisites are intentionally small:
+
+- Linux host;
+- Docker Engine;
+- Docker Compose v2 (`docker compose`);
+- outbound HTTPS to GHCR, Cloudflare, GitHub, and required package sources;
+- a read-only repository checkout or equivalent copy of this deployment contract.
+
+Cloud-provider provisioning and host package installation are kept outside this application repository for the first proof; the runtime deployment itself is provider-neutral.
+
+## Immutable image inputs
+
+On each host initialize the role instead of copying file names manually:
+
+```bash
+# Control-plane host
+bash bin/init-production-role control-plane
+
+# Executor host
+bash bin/init-production-role executor
+```
+
+This creates `deploy/production/.env` from `images.env.example`. Fill immutable references:
 
 ```text
 PLYWO_IMAGE_TAG=sha-<full-git-sha>
@@ -46,26 +78,28 @@ PLYWO_POSTGRES_IMAGE=postgres@sha256:<digest> # executor host only
 
 The application SHA must be identical on both roles. Pinning the supporting images makes rollback deterministic instead of silently following mutable Docker tags.
 
-## Host 1: control plane
-
-Copy:
-
-```text
-control-plane.env.example -> .env.control-plane
-tunnel.env.example        -> .env.control-plane.tunnel
-```
-
-Create the secret directory before the first start:
+If the GHCR package is private, authenticate each host with a read-only package credential before deployment:
 
 ```bash
-mkdir -p .secrets
-chmod 700 .secrets
+printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+```
+
+Do not place `GHCR_TOKEN` in any Plywo application env file.
+
+## Host 1: control plane
+
+Initialization creates:
+
+```text
+deploy/production/.env.control-plane
+deploy/production/.env.control-plane.tunnel
+deploy/production/.secrets/
 ```
 
 After GitHub App registration, place the returned private key at:
 
 ```text
-.secrets/plywo-github-private-key.pem
+deploy/production/.secrets/plywo-github-private-key.pem
 ```
 
 The directory is mounted read-only into the application container as `/run/secrets`. The private key itself therefore does not need to exist during the pre-registration bootstrap phase.
@@ -80,21 +114,20 @@ Required Cloudflare Tunnel route:
 app.plywo.com -> http://plywo:3000
 ```
 
-Start:
+Start or update:
 
 ```bash
-docker compose -f compose.control-plane.yml pull
-docker compose -f compose.control-plane.yml up -d
+bash bin/deploy-production-role control-plane deploy
 ```
 
 ## Host 2: executor
 
-Copy:
+Initialization creates:
 
 ```text
-executor.env.example          -> .env.executor
-executor-postgres.env.example -> .env.executor.postgres
-tunnel.env.example            -> .env.executor.tunnel
+deploy/production/.env.executor
+deploy/production/.env.executor.postgres
+deploy/production/.env.executor.tunnel
 ```
 
 Use the same randomly generated service credential on opposite sides:
@@ -112,18 +145,23 @@ Required Cloudflare Tunnel route:
 executor.plywo.com -> http://plywo:3000
 ```
 
-Start:
+Start or update:
 
 ```bash
-docker compose -f compose.executor.yml pull
-docker compose -f compose.executor.yml up -d
+bash bin/deploy-production-role executor deploy
 ```
 
 The executor route is service-authenticated. Do not configure GitHub App credentials on this host.
 
+## Production repository admission
+
+Until #82 provides disposable tenant isolation, production intentionally fails readiness unless `PLYWO_GITHUB_REPOSITORY_ALLOWLIST` contains one or more exact `owner/repository` values. Wildcard admission is rejected.
+
+For the #75 cross-account proof, configure exactly the external proof repository on the control plane before Phase B. See `REPOSITORY_ADMISSION.md` for the full temporary safety contract.
+
 ## Production bootstrap is intentionally two-phase
 
-The production control plane cannot be fully ready before the production GitHub App exists because `/ready` requires the App id, webhook secret, and readable private key. Registration therefore has a narrow bootstrap phase rather than weakening readiness.
+The production control plane cannot be fully ready before the production GitHub App exists because `/ready` requires the App id, webhook secret, readable private key, and production repository admission. Registration therefore has a narrow bootstrap phase rather than weakening readiness.
 
 ### Phase A: register the App
 
@@ -134,14 +172,18 @@ On the control plane:
 3. set `PLYWO_PUBLIC_URL=https://app.plywo.com`;
 4. provide a valid `SECRET_KEY_BASE`, `DATABASE_URL`, remote executor URL/token, and the other non-App production settings;
 5. leave the not-yet-issued App id/webhook secret/private key absent;
-6. start the deployment.
+6. deploy:
+
+```bash
+bash bin/deploy-production-role control-plane deploy
+```
 
 Expected state:
 
 ```text
 GET /up                       -> 200
 GET /github/app/register      -> 200
-GET /ready                    -> 503 (expected until App credentials exist)
+GET /ready                    -> 503 (expected until App credentials and admission exist)
 ```
 
 Open:
@@ -150,7 +192,7 @@ Open:
 https://app.plywo.com/github/app/register
 ```
 
-Register `Plywo` under the `plywo` organization. The production callback displays the one-time credentials; save them immediately to the control-plane secret store and write the private key to `.secrets/plywo-github-private-key.pem`.
+Register `Plywo` under the `plywo` organization. The production callback displays the one-time credentials; save them immediately to the control-plane secret store and write the private key to `deploy/production/.secrets/plywo-github-private-key.pem`.
 
 The browser registration/organization-owner confirmation is the one intentionally manual step.
 
@@ -163,6 +205,7 @@ PLYWO_GITHUB_APP_ID
 PLYWO_GITHUB_CLIENT_ID
 PLYWO_GITHUB_WEBHOOK_SECRET
 PLYWO_GITHUB_PRIVATE_KEY_PATH=/run/secrets/plywo-github-private-key.pem
+PLYWO_GITHUB_REPOSITORY_ALLOWLIST=<external-owner>/<proof-repository>
 ```
 
 Then disable bootstrap registration again:
@@ -171,10 +214,11 @@ Then disable bootstrap registration again:
 PLYWO_ENABLE_GITHUB_APP_REGISTRATION=0
 ```
 
-Restart the control plane and verify the complete topology:
+Redeploy the control plane and verify the complete topology:
 
 ```bash
-bash ../../bin/verify-production-topology \
+bash bin/deploy-production-role control-plane deploy
+bash bin/verify-production-topology \
   https://app.plywo.com \
   https://executor.plywo.com
 ```
@@ -195,9 +239,15 @@ Only after this gate is green should production GitHub webhook traffic be treate
 - a manual `workflow_dispatch`, or
 - a `v*` Git tag.
 
+The preferred operator command is:
+
+```bash
+bash bin/release-production-image main
+```
+
 Every release publishes an immutable `sha-<full-git-sha>` tag. Deploy both roles from the same SHA tag so the Request/Result contracts cannot drift between the control plane and executor.
 
-If the GHCR package is private, each production host needs a read-only registry credential before `docker compose pull`. The GitHub Actions publisher itself uses the repository `GITHUB_TOKEN` and does not require a separate package-write secret.
+The GitHub Actions publisher uses the repository `GITHUB_TOKEN` with `packages: write` and does not require a separate package-write secret.
 
 ## Cloudflare Tunnel
 
@@ -213,6 +263,7 @@ The first production proof intentionally uses Tunnel for stable HTTPS and avoids
 | GitHub App private key | yes | **never** |
 | GitHub webhook secret | yes | **never** |
 | GitHub App id/client id | yes | no |
+| repository allowlist | yes | no |
 | remote/executor service token | client side | server side |
 | Cloudflare Tunnel token | control-plane tunnel only | executor tunnel only |
 | executor PostgreSQL password | no | yes |
