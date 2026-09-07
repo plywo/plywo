@@ -26,7 +26,7 @@ x-control-plane-environment: &control-plane-environment
   PLYWO_GITHUB_PRIVATE_KEY_PATH: /lab-state/github-app.pem
   PLYWO_GITHUB_APP_CHECK_NAME: Plywo Lab / Behavioral Diff
   PLYWO_GITHUB_APP_BOT_LOGIN: plywo-lab[bot]
-  PLYWO_GITHUB_REPOSITORY_ALLOWLIST: lab/customer-rails
+  PLYWO_GITHUB_REPOSITORY_ALLOWLIST: admin/customer-rails
   PLYWO_EXECUTOR: remote
   PLYWO_REMOTE_EXECUTOR_URL: https://executor-tls:4443/v1/executions
   PLYWO_REMOTE_EXECUTOR_TOKEN: production-lab-executor-token
