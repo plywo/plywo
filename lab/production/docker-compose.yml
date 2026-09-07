@@ -1,0 +1,249 @@
+name: plywo-production-lab
+
+x-plywo-image: &plywo-image
+  image: plywo-production-lab:local
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+
+x-github-image: &github-image
+  image: plywo-production-lab-github:local
+  build:
+    context: ../..
+    dockerfile: lab/production/github/Dockerfile
+
+x-control-plane-environment: &control-plane-environment
+  RAILS_ENV: production
+  SECRET_KEY_BASE: production-lab-control-plane-secret-key-base
+  PLYWO_RUNTIME_ROLE: control_plane
+  DATABASE_URL: postgres://postgres:postgres@control-plane-postgres:5432/plywo_control_plane
+  SOLID_QUEUE_DATABASE_URL: postgres://postgres:postgres@control-plane-postgres:5432/plywo_control_plane_queue
+  PLYWO_PUBLIC_URL: https://control-plane-tls:4444
+  GITHUB_API_URL: https://github-edge:4002
+  PLYWO_GITHUB_APP_SLUG: plywo-lab
+  PLYWO_GITHUB_APP_ID: "12345"
+  PLYWO_GITHUB_WEBHOOK_SECRET: plywo-production-lab-webhook-secret
+  PLYWO_GITHUB_PRIVATE_KEY_PATH: /lab-state/github-app.pem
+  PLYWO_GITHUB_APP_CHECK_NAME: Plywo Lab / Behavioral Diff
+  PLYWO_GITHUB_APP_BOT_LOGIN: plywo-lab[bot]
+  PLYWO_GITHUB_REPOSITORY_ALLOWLIST: admin/customer-rails
+  PLYWO_EXECUTOR: remote
+  PLYWO_REMOTE_EXECUTOR_URL: https://executor-tls:4443/v1/executions
+  PLYWO_REMOTE_EXECUTOR_TOKEN: production-lab-executor-token
+  PLYWO_REMOTE_EXECUTOR_OPEN_TIMEOUT_SECONDS: "5"
+  PLYWO_REMOTE_EXECUTOR_READ_TIMEOUT_SECONDS: "300"
+  PLYWO_EXECUTION_LEASE_SECONDS: "240"
+  PLYWO_EXECUTION_HEARTBEAT_INTERVAL_SECONDS: "60"
+  SOLID_QUEUE_SKIP_RECURRING: "true"
+  SSL_CERT_FILE: /lab-tls/ca.pem
+
+x-executor-environment: &executor-environment
+  RAILS_ENV: production
+  SECRET_KEY_BASE: production-lab-executor-secret-key-base
+  PLYWO_RUNTIME_ROLE: executor_service
+  DATABASE_URL: postgres://postgres:postgres@executor-postgres:5432/plywo_executor
+  SOLID_QUEUE_DATABASE_URL: postgres://postgres:postgres@executor-postgres:5432/plywo_executor
+  PLYWO_EXECUTOR_SERVICE_TOKEN: production-lab-executor-token
+  PLYWO_EXECUTOR_SERVICE_ADAPTER: git_clone
+  PLYWO_EXECUTOR_SERVICE_REQUEST_LEASE_SECONDS: "360"
+  PLYWO_GITHUB_GIT_BASE_URL: http://git-origin
+  SSL_CERT_FILE: /lab-tls/ca.pem
+
+services:
+  prepare:
+    <<: *plywo-image
+    command: ruby script/prepare_production_lab.rb
+    environment:
+      PLYWO_LAB_GIT_ROOT: /lab-git
+      PLYWO_LAB_STATE_ROOT: /lab-state
+      PLYWO_LAB_TLS_ROOT: /lab-tls
+    volumes:
+      - lab-git:/lab-git
+      - lab-state:/lab-state
+      - lab-tls:/lab-tls
+
+  git-origin:
+    image: nginx:1.29-alpine
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+    volumes:
+      - lab-git:/usr/share/nginx/html:ro
+
+  github-emulator:
+    <<: *github-image
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+    environment:
+      LAB_GITHUB_WEBHOOK_SECRET: plywo-production-lab-webhook-secret
+      LAB_GITHUB_APP_ID: "12345"
+      LAB_GITHUB_INSTALLATION_ID: "100"
+      PLYWO_LAB_STATE_ROOT: /lab-state
+      NODE_EXTRA_CA_CERTS: /lab-tls/ca.pem
+    volumes:
+      - lab-state:/lab-state
+      - lab-tls:/lab-tls:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4001/meta').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+
+  github-edge:
+    <<: *github-image
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+      github-emulator:
+        condition: service_healthy
+    command: node edge.mjs
+    environment:
+      GITHUB_EMULATOR_URL: http://github-emulator:4001
+      PLYWO_CONTROL_PLANE_WEBHOOK_URL: https://control-plane-tls:4444/github/webhooks
+      LAB_GITHUB_WEBHOOK_SECRET: plywo-production-lab-webhook-secret
+      PLYWO_LAB_SHA_STATE: /lab-state/shas.json
+      PLYWO_LAB_TLS_ROOT: /lab-tls
+      NODE_EXTRA_CA_CERTS: /lab-tls/ca.pem
+    volumes:
+      - lab-state:/lab-state:ro
+      - lab-tls:/lab-tls:ro
+
+  control-plane-postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: plywo_control_plane
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d plywo_control_plane"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+
+  control-plane-db-prepare:
+    <<: *plywo-image
+    depends_on:
+      control-plane-postgres:
+        condition: service_healthy
+      prepare:
+        condition: service_completed_successfully
+    environment: *control-plane-environment
+    command: bin/rails db:prepare
+    volumes:
+      - lab-state:/lab-state:ro
+      - lab-tls:/lab-tls:ro
+
+  control-plane:
+    <<: *plywo-image
+    depends_on:
+      control-plane-db-prepare:
+        condition: service_completed_successfully
+      github-emulator:
+        condition: service_healthy
+    environment: *control-plane-environment
+    command: bin/rails server -b 0.0.0.0 -p 3000
+    volumes:
+      - lab-state:/lab-state:ro
+      - lab-tls:/lab-tls:ro
+
+  control-plane-worker:
+    <<: *plywo-image
+    depends_on:
+      control-plane-db-prepare:
+        condition: service_completed_successfully
+      github-emulator:
+        condition: service_healthy
+    environment: *control-plane-environment
+    command: ruby bin/jobs
+    volumes:
+      - lab-state:/lab-state:ro
+      - lab-tls:/lab-tls:ro
+
+  control-plane-tls:
+    image: nginx:1.29-alpine
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+      control-plane:
+        condition: service_started
+    volumes:
+      - ./control-plane.nginx.conf:/etc/nginx/nginx.conf:ro
+      - lab-tls:/lab-tls:ro
+
+  executor-postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: plywo_executor
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d plywo_executor"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+
+  executor-db-prepare:
+    <<: *plywo-image
+    depends_on:
+      executor-postgres:
+        condition: service_healthy
+      prepare:
+        condition: service_completed_successfully
+    environment: *executor-environment
+    command: bin/rails db:prepare
+    volumes:
+      - lab-tls:/lab-tls:ro
+
+  executor:
+    <<: *plywo-image
+    depends_on:
+      executor-db-prepare:
+        condition: service_completed_successfully
+      git-origin:
+        condition: service_started
+    environment: *executor-environment
+    command: bin/rails server -b 0.0.0.0 -p 3000
+    volumes:
+      - lab-tls:/lab-tls:ro
+
+  executor-tls:
+    image: nginx:1.29-alpine
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+      executor:
+        condition: service_started
+    volumes:
+      - ./executor.nginx.conf:/etc/nginx/nginx.conf:ro
+      - lab-tls:/lab-tls:ro
+
+  driver:
+    <<: *plywo-image
+    depends_on:
+      github-emulator:
+        condition: service_healthy
+      github-edge:
+        condition: service_started
+      control-plane-tls:
+        condition: service_started
+      executor-tls:
+        condition: service_started
+      control-plane-worker:
+        condition: service_started
+    environment:
+      GITHUB_EMULATOR_URL: http://github-emulator:4001
+      PLYWO_LAB_CONTROL_PLANE_URL: https://control-plane-tls:4444
+      PLYWO_LAB_EXECUTOR_URL: https://executor-tls:4443
+      PLYWO_LAB_GITHUB_ADMIN_TOKEN: lab-admin-token
+      PLYWO_GITHUB_APP_CHECK_NAME: Plywo Lab / Behavioral Diff
+      PLYWO_LAB_TIMEOUT_SECONDS: "300"
+      SSL_CERT_FILE: /lab-tls/ca.pem
+    command: ruby script/run_production_lab.rb
+    volumes:
+      - lab-tls:/lab-tls:ro
+
+volumes:
+  lab-git:
+  lab-state:
+  lab-tls:
