@@ -4,9 +4,56 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE=(docker compose -f "$ROOT/lab/production/docker-compose.yml")
 
+dump_failure_state() {
+  echo "=== production lab container state ===" >&2
+  "${COMPOSE[@]}" ps -a || true
+
+  echo "=== production lab control-plane state ===" >&2
+  "${COMPOSE[@]}" exec -T control-plane bin/rails runner '
+    deliveries = GithubWebhookDelivery.order(:id).map do |delivery|
+      {
+        delivery_id: delivery.delivery_id,
+        event: delivery.event,
+        action: delivery.action,
+        repository: delivery.repository,
+        pull_request_number: delivery.pull_request_number,
+        status: delivery.status,
+        failure: delivery.failure&.gsub(/Bearer\s+\S+/i, "Bearer [REDACTED]")
+      }
+    end
+    executions = PlywoExecution.order(:id).map do |execution|
+      {
+        execution_id: execution.execution_id,
+        status: execution.status,
+        outcome: execution.outcome,
+        decision: execution.decision,
+        failure: execution.failure&.gsub(/Bearer\s+\S+/i, "Bearer [REDACTED]")
+      }
+    end
+    queue = {
+      jobs: SolidQueue::Job.count,
+      ready: SolidQueue::ReadyExecution.count,
+      claimed: SolidQueue::ClaimedExecution.count,
+      failed: SolidQueue::FailedExecution.count
+    }
+
+    puts "production_lab_deliveries=#{deliveries.to_json}"
+    puts "production_lab_executions=#{executions.to_json}"
+    puts "production_lab_queue=#{queue.to_json}"
+  ' || true
+
+  echo "=== production lab application log ===" >&2
+  "${COMPOSE[@]}" exec -T control-plane sh -lc '
+    if [[ -f log/production.log ]]; then
+      grep -E "Plywo|GithubPullRequest|GithubWebhook|SolidQueue|ERROR|Error|exception|Exception" log/production.log | tail -n 240
+    fi
+  ' || true
+}
+
 cleanup() {
   local exit_code=$?
   if [[ $exit_code -ne 0 ]]; then
+    dump_failure_state
     echo "=== production lab logs ===" >&2
     "${COMPOSE[@]}" logs --no-color || true
   fi
