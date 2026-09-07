@@ -9,7 +9,7 @@ GitHub
   -> https://app.plywo.com
        -> Cloudflare Tunnel
        -> control_plane container
-            -> managed PostgreSQL
+            -> durable PostgreSQL
             -> https://executor.plywo.com
                  -> Cloudflare Tunnel
                  -> executor_service container
@@ -28,6 +28,24 @@ The product boundary already requires isolation, but the first production proof 
 
 Do not deploy `PLYWO_RUNTIME_ROLE=combined` in production; `/ready` rejects it.
 
+## Immutable image inputs
+
+On each host copy:
+
+```text
+images.env.example -> .env
+```
+
+Fill immutable references:
+
+```text
+PLYWO_IMAGE_TAG=sha-<full-git-sha>
+PLYWO_CLOUDFLARED_IMAGE=cloudflare/cloudflared@sha256:<digest>
+PLYWO_POSTGRES_IMAGE=postgres@sha256:<digest> # executor host only
+```
+
+The application SHA must be identical on both roles. Pinning the supporting images makes rollback deterministic instead of silently following mutable Docker tags.
+
 ## Host 1: control plane
 
 Copy:
@@ -37,13 +55,20 @@ control-plane.env.example -> .env.control-plane
 tunnel.env.example        -> .env.control-plane.tunnel
 ```
 
-Create:
+Create the secret directory before the first start:
+
+```bash
+mkdir -p .secrets
+chmod 700 .secrets
+```
+
+After GitHub App registration, place the returned private key at:
 
 ```text
 .secrets/plywo-github-private-key.pem
 ```
 
-The private key file must be readable only by the deployment operator and mounted read-only into the container at `/run/secrets/plywo-github-private-key.pem`.
+The directory is mounted read-only into the application container as `/run/secrets`. The private key itself therefore does not need to exist during the pre-registration bootstrap phase.
 
 Required external dependency:
 
@@ -58,20 +83,9 @@ app.plywo.com -> http://plywo:3000
 Start:
 
 ```bash
-export PLYWO_IMAGE_TAG=sha-<full-git-sha>
 docker compose -f compose.control-plane.yml pull
 docker compose -f compose.control-plane.yml up -d
 ```
-
-Verify:
-
-```bash
-curl -fsS https://app.plywo.com/up
-curl -fsS https://app.plywo.com/ready
-curl -fsS https://app.plywo.com/onboarding >/dev/null
-```
-
-`/ready` must report `{"status":"ready","role":"control_plane","errors":[]}` before GitHub webhook traffic is enabled.
 
 ## Host 2: executor
 
@@ -101,25 +115,82 @@ executor.plywo.com -> http://plywo:3000
 Start:
 
 ```bash
-export PLYWO_IMAGE_TAG=sha-<same-full-git-sha>
 docker compose -f compose.executor.yml pull
 docker compose -f compose.executor.yml up -d
 ```
 
-Verify:
+The executor route is service-authenticated. Do not configure GitHub App credentials on this host.
 
-```bash
-curl -fsS https://executor.plywo.com/up
-curl -fsS https://executor.plywo.com/ready
+## Production bootstrap is intentionally two-phase
+
+The production control plane cannot be fully ready before the production GitHub App exists because `/ready` requires the App id, webhook secret, and readable private key. Registration therefore has a narrow bootstrap phase rather than weakening readiness.
+
+### Phase A: register the App
+
+On the control plane:
+
+1. set `PLYWO_GITHUB_APP_MANIFEST_ENV=production`;
+2. set `PLYWO_ENABLE_GITHUB_APP_REGISTRATION=1`;
+3. set `PLYWO_PUBLIC_URL=https://app.plywo.com`;
+4. provide a valid `SECRET_KEY_BASE`, `DATABASE_URL`, remote executor URL/token, and the other non-App production settings;
+5. leave the not-yet-issued App id/webhook secret/private key absent;
+6. start the deployment.
+
+Expected state:
+
+```text
+GET /up                       -> 200
+GET /github/app/register      -> 200
+GET /ready                    -> 503 (expected until App credentials exist)
 ```
 
-`/ready` must report `{"status":"ready","role":"executor_service","errors":[]}`.
+Open:
 
-The executor route is service-authenticated. Do not configure GitHub App credentials on this host.
+```text
+https://app.plywo.com/github/app/register
+```
+
+Register `Plywo` under the `plywo` organization. The production callback displays the one-time credentials; save them immediately to the control-plane secret store and write the private key to `.secrets/plywo-github-private-key.pem`.
+
+The browser registration/organization-owner confirmation is the one intentionally manual step.
+
+### Phase B: become production-ready
+
+Populate:
+
+```text
+PLYWO_GITHUB_APP_ID
+PLYWO_GITHUB_CLIENT_ID
+PLYWO_GITHUB_WEBHOOK_SECRET
+PLYWO_GITHUB_PRIVATE_KEY_PATH=/run/secrets/plywo-github-private-key.pem
+```
+
+Then disable bootstrap registration again:
+
+```text
+PLYWO_ENABLE_GITHUB_APP_REGISTRATION=0
+```
+
+Restart the control plane and verify the complete topology:
+
+```bash
+bash ../../bin/verify-production-topology \
+  https://app.plywo.com \
+  https://executor.plywo.com
+```
+
+Expected readiness payloads:
+
+```json
+{"status":"ready","role":"control_plane","errors":[]}
+{"status":"ready","role":"executor_service","errors":[]}
+```
+
+Only after this gate is green should production GitHub webhook traffic be treated as live.
 
 ## Image release
 
-`.github/workflows/release-image.yml` publishes the same Dockerfile to GHCR on either:
+`.github/workflows/release-image.yml` publishes the repository Dockerfile to GHCR on either:
 
 - a manual `workflow_dispatch`, or
 - a `v*` Git tag.
@@ -138,6 +209,7 @@ The first production proof intentionally uses Tunnel for stable HTTPS and avoids
 
 | Secret / credential | Control plane | Executor |
 | --- | --- | --- |
+| `SECRET_KEY_BASE` | own value | different value |
 | GitHub App private key | yes | **never** |
 | GitHub webhook secret | yes | **never** |
 | GitHub App id/client id | yes | no |
@@ -146,20 +218,17 @@ The first production proof intentionally uses Tunnel for stable HTTPS and avoids
 | executor PostgreSQL password | no | yes |
 | control-plane `DATABASE_URL` | yes | no |
 
-The two Cloudflare Tunnel tokens must also remain separate.
+The two Cloudflare Tunnel tokens and two Rails `SECRET_KEY_BASE` values must remain separate.
 
-## Production GitHub App registration
+## Post-install verification
 
-Only after both `/ready` endpoints are green:
+The production manifest points GitHub back to:
 
-1. set the control plane `PLYWO_PUBLIC_URL=https://app.plywo.com`;
-2. open `https://app.plywo.com/github/app/register` while the production manifest environment is selected;
-3. register `Plywo` under the `plywo` organization;
-4. save the returned production App credentials to the control-plane secret store;
-5. restart the control plane and re-check `/ready`;
-6. verify the public App install page returns to `https://app.plywo.com/onboarding` after installation.
+```text
+https://app.plywo.com/onboarding
+```
 
-The browser registration/ownership confirmation is the one intentionally manual step.
+After registration, verify that the public App installation page can be opened by an account outside `plywo` and that post-install setup lands on the onboarding page.
 
 ## Cross-account acceptance
 
