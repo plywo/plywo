@@ -4,23 +4,28 @@ require "yaml"
 class ProductionDeploymentContractTest < ActiveSupport::TestCase
   ROOT = Rails.root.join("deploy/production")
 
-  test "control plane keeps application ports private and GitHub key mounted read only" do
+  test "control plane keeps application ports private and runs migrations plus Solid Queue worker" do
     compose = YAML.safe_load(ROOT.join("compose.control-plane.yml").read)
     services = compose.fetch("services")
 
     assert_equal ["3000"], services.dig("plywo", "expose")
     assert_nil services.dig("plywo", "ports")
     assert_includes services.dig("plywo", "volumes"), "./.secrets:/run/secrets:ro"
+    assert_equal "bin/rails db:prepare", services.dig("migrate", "command")
+    assert_equal "bin/jobs", services.dig("worker", "command")
+    assert_equal "service_completed_successfully", services.dig("plywo", "depends_on", "migrate", "condition")
     assert_match(/PLYWO_CLOUDFLARED_IMAGE/, services.dig("tunnel", "image"))
   end
 
-  test "executor keeps application and postgres ports private and infrastructure images pinned by contract" do
+  test "executor keeps application and postgres ports private and prepares its ledger before start" do
     compose = YAML.safe_load(ROOT.join("compose.executor.yml").read)
     services = compose.fetch("services")
 
     assert_equal ["3000"], services.dig("plywo", "expose")
     assert_nil services.dig("plywo", "ports")
     assert_nil services.dig("postgres", "ports")
+    assert_equal "bin/rails db:prepare", services.dig("migrate", "command")
+    assert_equal "service_completed_successfully", services.dig("plywo", "depends_on", "migrate", "condition")
     assert_match(/PLYWO_POSTGRES_IMAGE/, services.dig("postgres", "image"))
     assert_match(/PLYWO_CLOUDFLARED_IMAGE/, services.dig("tunnel", "image"))
   end
@@ -34,6 +39,7 @@ class ProductionDeploymentContractTest < ActiveSupport::TestCase
     refute_match(/^PLYWO_REMOTE_EXECUTOR_TOKEN=/, env)
     refute_match(/^PLYWO_EXECUTOR=remote$/, env)
 
+    assert_match(/^SECRET_KEY_BASE=$/, env)
     assert_match(/^PLYWO_RUNTIME_ROLE=executor_service$/, env)
     assert_match(/^PLYWO_EXECUTOR_SERVICE_ADAPTER=git_clone$/, env)
   end
@@ -41,9 +47,11 @@ class ProductionDeploymentContractTest < ActiveSupport::TestCase
   test "control-plane environment example requires remote execution and production app identity" do
     env = ROOT.join("control-plane.env.example").read
 
+    assert_match(/^SECRET_KEY_BASE=$/, env)
     assert_match(/^PLYWO_RUNTIME_ROLE=control_plane$/, env)
     assert_match(/^PLYWO_GITHUB_APP_MANIFEST_ENV=production$/, env)
     assert_match(/^PLYWO_GITHUB_APP_SLUG=plywo$/, env)
+    assert_match(/^PLYWO_ENABLE_GITHUB_APP_REGISTRATION=0$/, env)
     assert_match(/^PLYWO_EXECUTOR=remote$/, env)
     assert_match(%r{^PLYWO_REMOTE_EXECUTOR_URL=https://}, env)
   end
