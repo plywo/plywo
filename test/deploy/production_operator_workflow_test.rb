@@ -91,7 +91,7 @@ class ProductionOperatorWorkflowTest < ActiveSupport::TestCase
     end
   end
 
-  test "release helper dispatches the workflow at an exact commit sha" do
+  test "release helper dispatches on a Git ref but pins checkout to an exact commit sha" do
     Dir.mktmpdir("plywo-production-release-") do |destination|
       fake_bin = File.join(destination, "fake-bin")
       log = File.join(destination, "gh.log")
@@ -121,7 +121,8 @@ class ProductionOperatorWorkflowTest < ActiveSupport::TestCase
       assert status.success?, stderr
       calls = File.readlines(log, chomp: true)
       assert_includes calls, "api repos/plywo/plywo/commits/main --jq .sha"
-      assert_includes calls, "workflow run release-image.yml --repo plywo/plywo --ref #{sha}"
+      assert_includes calls,
+        "workflow run release-image.yml --repo plywo/plywo --ref main -f release_sha=#{sha}"
       assert_includes stdout, "image tag:  sha-#{sha}"
     end
   end
