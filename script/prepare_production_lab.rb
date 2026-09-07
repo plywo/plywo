@@ -61,7 +61,7 @@ module PlywoProductionLabPrepare
     write_configuration(work)
     neutral_sha = commit!(work, "Configure Plywo without behavior change")
 
-    bare = GIT_ROOT.join("lab", "customer-rails.git")
+    bare = GIT_ROOT.join("admin", "customer-rails.git")
     FileUtils.mkdir_p(bare.dirname)
     run!([ "git", "clone", "-q", "--bare", work.to_s, bare.to_s ], chdir: WORK_ROOT)
     run!([ "git", "update-ref", "refs/heads/main", baseline_sha ], chdir: bare)
@@ -72,7 +72,7 @@ module PlywoProductionLabPrepare
     run!(%w[git update-server-info], chdir: bare)
 
     state = {
-      "repository" => "lab/customer-rails",
+      "repository" => "admin/customer-rails",
       "pull_requests" => {
         "1" => { "base_sha" => baseline_sha, "head_sha" => regression_sha, "kind" => "regression" },
         "2" => { "base_sha" => baseline_sha, "head_sha" => neutral_sha, "kind" => "neutral" }
