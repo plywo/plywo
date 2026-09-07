@@ -66,15 +66,19 @@ module Plywo
         subject_environment: nil,
         subject_discovery: nil,
         subject_bootstrap: nil,
+        subject_lifecycle: nil,
         capture_runtime: nil
       )
         @root = Pathname(root).expand_path
         @tool_root = Pathname(tool_root).expand_path
         @command_runner = command_runner
         @fetch_repository = fetch_repository
-        @subject_environment = subject_environment
-        @subject_discovery = subject_discovery || Plywo::Subject::Discovery.new(command_runner:)
-        @subject_bootstrap = subject_bootstrap
+        subject_discovery ||= Plywo::Subject::Discovery.new(command_runner:)
+        @subject_lifecycle = subject_lifecycle || Plywo::Subject::Lifecycle.new(
+          discovery: subject_discovery,
+          bootstrap: subject_bootstrap,
+          environment: subject_environment
+        )
         @capture_runtime = capture_runtime || Plywo::Subject::RailsCaptureRuntime.new
       end
 
@@ -90,83 +94,49 @@ module Plywo
         prepare_worktree!(path: paths.fetch(:candidate_root), sha: execution.candidate_sha)
 
         configuration = Plywo::Subject::Configuration.load(root: paths.fetch(:candidate_root))
-        baseline_runtime_env = bootstrap_subject(root: paths.fetch(:baseline_root))
-        candidate_runtime_env = bootstrap_subject(root: paths.fetch(:candidate_root))
 
-        baseline_subject_environment = subject_environment_for(
-          root: paths.fetch(:baseline_root),
-          configuration:,
-          runtime_env: baseline_runtime_env
-        )
-        candidate_subject_environment = subject_environment_for(
-          root: paths.fetch(:candidate_root),
-          configuration:,
-          runtime_env: candidate_runtime_env
-        )
-
-        baseline_env = baseline_subject_environment.prepare(
+        @subject_lifecycle.open(
           root: paths.fetch(:baseline_root),
           execution:,
-          role: "base"
-        ).merge(configuration.capture_env)
-        candidate_env = candidate_subject_environment.prepare(
-          root: paths.fetch(:candidate_root),
-          execution:,
-          role: "candidate"
-        ).merge(configuration.capture_env)
-
-        capture_subject!(
-          execution:,
-          root: paths.fetch(:baseline_root),
-          label: context.fetch("baseline_ref"),
-          sha: execution.baseline_sha,
-          environment: baseline_env,
-          output: paths.fetch(:baseline_output)
-        )
-        capture_subject!(
-          execution:,
-          root: paths.fetch(:candidate_root),
-          label: context.fetch("candidate_ref"),
-          sha: execution.candidate_sha,
-          environment: candidate_env,
-          output: paths.fetch(:candidate_output)
-        )
-
-        compare(
-          baseline_output: paths.fetch(:baseline_output),
-          candidate_output: paths.fetch(:candidate_output),
-          changed_paths: changed_paths(execution:)
-        )
-      ensure
-        if paths
-          candidate_subject_environment&.cleanup(
+          role: "base",
+          configuration:
+        ) do |baseline_subject|
+          @subject_lifecycle.open(
             root: paths.fetch(:candidate_root),
             execution:,
-            role: "candidate"
-          )
-          baseline_subject_environment&.cleanup(
-            root: paths.fetch(:baseline_root),
-            execution:,
-            role: "base"
-          )
+            role: "candidate",
+            configuration:
+          ) do |candidate_subject|
+            capture_subject!(
+              execution:,
+              root: paths.fetch(:baseline_root),
+              label: context.fetch("baseline_ref"),
+              sha: execution.baseline_sha,
+              environment: baseline_subject.env,
+              output: paths.fetch(:baseline_output)
+            )
+            capture_subject!(
+              execution:,
+              root: paths.fetch(:candidate_root),
+              label: context.fetch("candidate_ref"),
+              sha: execution.candidate_sha,
+              environment: candidate_subject.env,
+              output: paths.fetch(:candidate_output)
+            )
+
+            compare(
+              baseline_output: paths.fetch(:baseline_output),
+              candidate_output: paths.fetch(:candidate_output),
+              changed_paths: changed_paths(execution:)
+            )
+          end
         end
+      ensure
         cleanup_worktree(paths&.fetch(:baseline_root, nil))
         cleanup_worktree(paths&.fetch(:candidate_root, nil))
       end
 
       private
-
-      def bootstrap_subject(root:)
-        return {} unless @subject_bootstrap
-
-        @subject_bootstrap.call(root:)
-      end
-
-      def subject_environment_for(root:, configuration:, runtime_env:)
-        return @subject_environment if @subject_environment
-
-        @subject_discovery.resolve(root:, configuration:, runtime_env:)
-      end
 
       def assert_local_subject!(context:)
         candidate_repository = context.fetch("candidate_repository")
