@@ -1,0 +1,49 @@
+name: Production Lab
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "bin/**"
+      - "config/**"
+      - "db/**"
+      - "lab/**"
+      - "lib/**"
+      - "script/**"
+      - "Dockerfile"
+      - "Gemfile"
+      - "Gemfile.lock"
+      - ".github/workflows/production-lab.yml"
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "bin/**"
+      - "config/**"
+      - "db/**"
+      - "lab/**"
+      - "lib/**"
+      - "script/**"
+      - "Dockerfile"
+      - "Gemfile"
+      - "Gemfile.lock"
+      - ".github/workflows/production-lab.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-lab-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  production_lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run hermetic production lab
+        run: bash bin/production-lab
