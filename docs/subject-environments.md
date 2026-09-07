@@ -4,15 +4,47 @@ Plywo's own control plane is intentionally Rails + PostgreSQL. Customer subject 
 
 A subject environment prepares the software being measured and returns the runtime environment needed to capture baseline/candidate evidence. The local GitHub runner delegates these responsibilities instead of owning database-product setup directly.
 
-The lifecycle interface is intentionally small:
+## Lifecycle orchestration
+
+`Plywo::Subject::Lifecycle` owns the orchestration around one exact subject worktree:
+
+```text
+discover subject contract
+  -> bootstrap dependencies/toolchain
+  -> prepare isolated state
+  -> start subject-owned services
+  -> healthcheck/readiness
+  -> capture evidence
+  -> stop subject-owned services
+  -> cleanup isolated state
+```
+
+The phases deliberately compose existing boundaries instead of turning `Environment` into a framework-specific setup script:
+
+- `Subject::Discovery` selects the environment implementation.
+- a bootstrap adapter such as `RailsBundleBootstrap` prepares reproducible dependencies and returns runtime environment values.
+- `Environment#prepare` provisions the role-specific state required for execution, including database preparation today.
+- `Environment#start_services` starts any adapter-owned runtime services required by the subject.
+- `Environment#healthcheck` proves those services are ready before capture begins.
+- the caller performs capture inside the lifecycle session.
+- `Environment#stop_services` and `Environment#cleanup` run during teardown.
+
+The service hooks are no-ops by default, so the current in-process Rails + SQLite and Rails + PostgreSQL subjects keep their existing behavior. Future environments can own app servers, Redis, Compose services, or other dependencies without moving that orchestration into the GitHub runner.
+
+Teardown is an invariant. Once an environment has been resolved, `cleanup` runs even when state preparation, service startup, readiness, or capture fails. If service startup was attempted, `stop_services` runs before cleanup. Baseline and candidate lifecycle sessions execute sequentially so subject-owned ports and service state cannot leak across the A/B boundary.
+
+The environment-level interface is:
 
 ```text
 prepare(root:, execution:, role:)
 env_for(root:, execution:, role:)
+start_services(root:, execution:, role:, env:)
+healthcheck(root:, execution:, role:, env:)
+stop_services(root:, execution:, role:, env:)
 cleanup(root:, execution:, role:)
 ```
 
-`prepare` establishes isolated comparable state and returns the environment used for capture. `env_for` exposes the same environment without mutating subject state. `cleanup` releases adapter-owned resources after the run.
+`env_for` exposes the adapter environment without mutating subject state. The other methods participate in lifecycle orchestration as described above.
 
 ## Capability contract
 
@@ -108,6 +140,7 @@ The SQLite database path is passed through the adapter-private `PLYWO_SQLITE_DAT
 Plywo::Executor::Request v1
   -> LocalAdapter
   -> LocalPullRequestRunner
+  -> Subject::Lifecycle
   -> RailsSqliteEnvironment
   -> script/plywo_capture_subject.rb
   -> ExecutionReducer / ExecutionPair
@@ -126,4 +159,4 @@ Future adapters may add richer portable semantics and native evidence side by si
 
 Do not build framework/database/queue adapter matrices speculatively. Add capability implementations when a real customer stack requires them. Rails + SQLite is the first portability proof; subsequent adapters can compose the same namespaces without changing the portable executor wire contract.
 
-See #43, #44, and #54.
+See #43, #44, #54, #78, and #82.
