@@ -12,4 +12,7 @@ Read in this order:
 8. `onboarding.md`
 9. `demo/0001-behavioral-diff.md`
 10. `rfcs/0001-agent-readable-result-contract.md`
-11. `roadmap.md`
+11. `rfcs/0002-runner-adapter-contract.md`
+12. `rfcs/0003-one-baseline-many-candidates.md`
+13. `rfcs/0004-compute-and-executor-strategy.md`
+14. `roadmap.md`
