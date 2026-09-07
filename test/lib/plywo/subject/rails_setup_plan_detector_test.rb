@@ -21,7 +21,7 @@ class PlywoSubjectRailsSetupPlanDetectorTest < ActiveSupport::TestCase
       assert_equal "ruby.bundle", plan.steps_for("bootstrap").sole.operation
       assert_equal "Gemfile.lock", plan.steps_for("bootstrap").sole.details.fetch("lockfile")
       assert_equal "rails.db_prepare", plan.steps_for("prepare").sole.operation
-      assert_equal [ "bin/rails", "db:prepare" ], plan.steps_for("prepare").sole.details.fetch("command")
+      assert_equal "db:prepare", plan.steps_for("prepare").sole.details.fetch("task")
       assert_equal "auto", plan.steps_for("prepare").sole.details.fetch("persistence_mode")
       assert_equal "subject.state_cleanup", plan.steps_for("cleanup").sole.operation
       assert_equal true, plan.evidence.fetch("bin_setup")
