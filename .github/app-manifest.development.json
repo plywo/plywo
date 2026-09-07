@@ -7,6 +7,7 @@
     "active": true
   },
   "redirect_url": "{{PLYWO_PUBLIC_URL}}/github/app/manifest/callback",
+  "setup_url": "{{PLYWO_PUBLIC_URL}}/onboarding",
   "public": false,
   "default_permissions": {
     "checks": "write",
@@ -18,5 +19,5 @@
     "check_run"
   ],
   "request_oauth_on_install": false,
-  "setup_on_update": false
+  "setup_on_update": true
 }

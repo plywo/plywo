@@ -10,6 +10,8 @@ class PlywoGithubAppManifestTest < ActiveSupport::TestCase
     assert_equal "Plywo Development", manifest.fetch("name")
     assert_equal "https://plywo-dev.example.test/github/webhooks", manifest.dig("hook_attributes", "url")
     assert_equal "https://plywo-dev.example.test/github/app/manifest/callback", manifest.fetch("redirect_url")
+    assert_equal "https://plywo-dev.example.test/onboarding", manifest.fetch("setup_url")
+    assert manifest.fetch("setup_on_update")
     assert_not manifest.fetch("public")
     assert_equal "write", manifest.dig("default_permissions", "checks")
     assert_equal "read", manifest.dig("default_permissions", "contents")
@@ -25,6 +27,8 @@ class PlywoGithubAppManifestTest < ActiveSupport::TestCase
     assert_equal "Plywo Staging", manifest.fetch("name")
     assert_equal "https://plywo-staging.example.test/github/webhooks", manifest.dig("hook_attributes", "url")
     assert_equal "https://plywo-staging.example.test/github/app/manifest/callback", manifest.fetch("redirect_url")
+    assert_equal "https://plywo-staging.example.test/onboarding", manifest.fetch("setup_url")
+    assert manifest.fetch("setup_on_update")
     assert_not manifest.fetch("public")
   end
 
@@ -36,6 +40,8 @@ class PlywoGithubAppManifestTest < ActiveSupport::TestCase
 
     assert_equal "Plywo", manifest.fetch("name")
     assert_equal "https://plywo.example.test/github/webhooks", manifest.dig("hook_attributes", "url")
+    assert_equal "https://plywo.example.test/onboarding", manifest.fetch("setup_url")
+    assert manifest.fetch("setup_on_update")
     assert manifest.fetch("public")
   end
 
