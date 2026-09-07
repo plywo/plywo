@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    env_file:
+      - .env.executor.postgres
+    volumes:
+      - executor-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  plywo:
+    image: ghcr.io/plywo/plywo:${PLYWO_IMAGE_TAG:?set PLYWO_IMAGE_TAG to an immutable release or sha tag}
+    restart: unless-stopped
+    env_file:
+      - .env.executor
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    env_file:
+      - .env.executor.tunnel
+    command: tunnel --no-autoupdate run
+    depends_on:
+      - plywo
+
+volumes:
+  executor-postgres:
