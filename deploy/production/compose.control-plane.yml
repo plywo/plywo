@@ -5,7 +5,7 @@ services:
     env_file:
       - .env.control-plane
     volumes:
-      - ./.secrets/plywo-github-private-key.pem:/run/secrets/plywo-github-private-key.pem:ro
+      - ./.secrets:/run/secrets:ro
     expose:
       - "3000"
 
