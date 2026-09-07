@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17
+    image: ${PLYWO_POSTGRES_IMAGE:?set PLYWO_POSTGRES_IMAGE to an immutable PostgreSQL image reference}
     restart: unless-stopped
     env_file:
       - .env.executor.postgres
@@ -24,7 +24,7 @@ services:
       - "3000"
 
   tunnel:
-    image: cloudflare/cloudflared:latest
+    image: ${PLYWO_CLOUDFLARED_IMAGE:?set PLYWO_CLOUDFLARED_IMAGE to an immutable cloudflared image reference}
     restart: unless-stopped
     env_file:
       - .env.executor.tunnel
