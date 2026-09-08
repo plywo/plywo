@@ -8,16 +8,24 @@ module Plywo
 
       CURRENT_VERSION = 1
       DEFAULT_PERSISTENCE = "auto".freeze
+      DEFAULT_SETUP_MODE = "auto".freeze
       PERSISTENCE_VALUES = %w[auto postgresql sqlite].freeze
+      SETUP_MODE_VALUES = %w[auto].freeze
       TOP_LEVEL_KEYS = %w[version scenario subject].freeze
       SCENARIO_KEYS = %w[path].freeze
-      SUBJECT_KEYS = %w[persistence].freeze
+      SUBJECT_KEYS = %w[persistence setup].freeze
+      SETUP_KEYS = %w[mode].freeze
 
-      attr_reader :scenario_path, :persistence, :source_path
+      attr_reader :scenario_path, :persistence, :setup_mode, :source_path
 
       def self.load(root:)
         path = Pathname(root).join("plywo.yml")
-        return new(scenario_path: nil, persistence: DEFAULT_PERSISTENCE, source_path: nil) unless path.file?
+        return new(
+          scenario_path: nil,
+          persistence: DEFAULT_PERSISTENCE,
+          setup_mode: DEFAULT_SETUP_MODE,
+          source_path: nil
+        ) unless path.file?
 
         payload = YAML.safe_load(path.read, permitted_classes: [], permitted_symbols: [], aliases: false) || {}
         validate_mapping!(payload, name: "plywo.yml", allowed_keys: TOP_LEVEL_KEYS)
@@ -27,8 +35,10 @@ module Plywo
 
         scenario = payload.fetch("scenario", {}) || {}
         subject = payload.fetch("subject", {}) || {}
+        setup = subject.fetch("setup", {}) || {}
         validate_mapping!(scenario, name: "scenario", allowed_keys: SCENARIO_KEYS)
         validate_mapping!(subject, name: "subject", allowed_keys: SUBJECT_KEYS)
+        validate_mapping!(setup, name: "subject.setup", allowed_keys: SETUP_KEYS)
 
         scenario_path = scenario["path"]
         validate_scenario_path!(scenario_path)
@@ -38,14 +48,20 @@ module Plywo
           raise Error, "Unsupported subject.persistence #{persistence.inspect}; expected one of #{PERSISTENCE_VALUES.join(", ")}"
         end
 
-        new(scenario_path:, persistence:, source_path: path)
+        setup_mode = setup.fetch("mode", DEFAULT_SETUP_MODE).to_s
+        unless SETUP_MODE_VALUES.include?(setup_mode)
+          raise Error, "Unsupported subject.setup.mode #{setup_mode.inspect}; expected one of #{SETUP_MODE_VALUES.join(", ")}"
+        end
+
+        new(scenario_path:, persistence:, setup_mode:, source_path: path)
       rescue Psych::Exception => error
         raise Error, "Invalid plywo.yml: #{error.message}"
       end
 
-      def initialize(scenario_path:, persistence:, source_path:)
+      def initialize(scenario_path:, persistence:, source_path:, setup_mode: DEFAULT_SETUP_MODE)
         @scenario_path = scenario_path
         @persistence = persistence
+        @setup_mode = setup_mode
         @source_path = source_path
       end
 
