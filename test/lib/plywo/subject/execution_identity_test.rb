@@ -43,8 +43,8 @@ class ExecutionIdentityTest < ActiveSupport::TestCase
     assert_includes error.message, "PLYWO_SUBJECT_HOME, and PLYWO_SUBJECT_USER together"
   end
 
-  test "fails closed on invalid uid" do
-    error = assert_raises(Plywo::Subject::ExecutionIdentity::Error) do
+  test "fails closed on invalid or root uid" do
+    invalid = assert_raises(Plywo::Subject::ExecutionIdentity::Error) do
       Plywo::Subject::ExecutionIdentity.from_env(
         "PLYWO_SUBJECT_UID" => "root",
         "PLYWO_SUBJECT_GID" => "10001",
@@ -52,7 +52,44 @@ class ExecutionIdentityTest < ActiveSupport::TestCase
         "PLYWO_SUBJECT_USER" => "plywo-subject"
       )
     end
+    root = assert_raises(Plywo::Subject::ExecutionIdentity::Error) do
+      Plywo::Subject::ExecutionIdentity.from_env(
+        "PLYWO_SUBJECT_UID" => "0",
+        "PLYWO_SUBJECT_GID" => "10001",
+        "PLYWO_SUBJECT_HOME" => "/home/plywo-subject",
+        "PLYWO_SUBJECT_USER" => "plywo-subject"
+      )
+    end
 
-    assert_equal "PLYWO_SUBJECT_UID must be a non-negative integer", error.message
+    assert_equal "PLYWO_SUBJECT_UID must be a positive integer", invalid.message
+    assert_equal "PLYWO_SUBJECT_UID must be a positive integer", root.message
+  end
+
+  test "fails closed when subject uid matches executor uid" do
+    skip "executor uid is root and rejected by positive uid validation" if Process.euid.zero?
+
+    error = assert_raises(Plywo::Subject::ExecutionIdentity::Error) do
+      Plywo::Subject::ExecutionIdentity.new(
+        uid: Process.euid,
+        gid: Process.egid.positive? ? Process.egid : 10_001,
+        home: "/tmp/plywo-subject",
+        user: "plywo-subject"
+      )
+    end
+
+    assert_match(/must differ from executor uid/, error.message)
+  end
+
+  test "fails closed on relative home" do
+    error = assert_raises(Plywo::Subject::ExecutionIdentity::Error) do
+      Plywo::Subject::ExecutionIdentity.new(
+        uid: 10_001,
+        gid: 10_001,
+        home: "relative/home",
+        user: "plywo-subject"
+      )
+    end
+
+    assert_equal "Subject execution home must be an absolute path", error.message
   end
 end
