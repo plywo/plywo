@@ -144,6 +144,7 @@ module Plywo
         runtime = details.fetch("runtime")
         @execution_identity.prepare_tree(root)
         @execution_identity.prepare_directory(state_dir)
+        @execution_identity.prepare_runtime_home(root)
         entrypoint = resolve_entrypoint(root:, value: details.fetch("entrypoint"), service_name: name)
         args = details.fetch("args")
         port_env = details.fetch("port_env")
@@ -160,7 +161,7 @@ module Plywo
         url = "http://#{host}:#{port}"
         service_env = safe_inherited_environment
           .merge(env)
-          .merge(@execution_identity.environment)
+          .merge(@execution_identity.environment(workspace: root))
           .merge(
             port_env => port.to_s,
             url_env => url
