@@ -1,6 +1,7 @@
 require "fileutils"
 require "net/http"
 require "pathname"
+require "rbconfig"
 require "socket"
 require "timeout"
 require "tmpdir"
@@ -24,6 +25,7 @@ module Plywo
       SUPPORTED_START_OPERATION = "process.start".freeze
       SUPPORTED_HEALTHCHECK_OPERATION = "http.wait_ready".freeze
       SUPPORTED_STOP_OPERATION = "process.stop".freeze
+      SUPPORTED_RUNTIME = "ruby".freeze
       STOP_TIMEOUT_SECONDS = 2
       READINESS_INTERVAL_SECONDS = 0.05
 
@@ -113,9 +115,18 @@ module Plywo
       def start_process(root:, env:, step:, state_dir:)
         details = step.details
         name = details.fetch("name")
-        command = details.fetch("command")
+        runtime = details.fetch("runtime")
+        entrypoint = resolve_entrypoint(root:, value: details.fetch("entrypoint"), service_name: name)
+        args = details.fetch("args")
         port_env = details.fetch("port_env")
         url_env = details.fetch("url_env")
+        if env.key?(url_env)
+          raise Error, "Service #{name.inspect} cannot overwrite capture environment #{url_env.inspect}"
+        end
+        unless runtime == SUPPORTED_RUNTIME
+          raise Error, "Unsupported service runtime #{runtime.inspect} for #{name.inspect}"
+        end
+
         port = allocate_port
         url = "http://127.0.0.1:#{port}"
         service_env = safe_inherited_environment.merge(env).merge(
@@ -127,7 +138,10 @@ module Plywo
 
         pid = Process.spawn(
           service_env,
-          *command,
+          RbConfig.ruby,
+          "--",
+          entrypoint.to_s,
+          *args,
           chdir: root.to_s,
           out: stdout_path.to_s,
           err: stderr_path.to_s,
@@ -144,6 +158,21 @@ module Plywo
         )
       rescue SystemCallError => error
         raise Error, "Could not start service #{name.inspect}: #{error.message}"
+      end
+
+      def resolve_entrypoint(root:, value:, service_name:)
+        root = root.realpath
+        candidate = root.join(value)
+        resolved = candidate.realpath
+        prefix = "#{root.to_s.chomp(File::SEPARATOR)}#{File::SEPARATOR}"
+
+        unless resolved.to_s.start_with?(prefix) && resolved.file?
+          raise Error, "Service #{service_name.inspect} entrypoint must resolve to a file inside the repository"
+        end
+
+        resolved
+      rescue Errno::ENOENT, Errno::EACCES => error
+        raise Error, "Service #{service_name.inspect} entrypoint is unavailable: #{error.message}"
       end
 
       def wait_until_ready(service:, step:, env:)
