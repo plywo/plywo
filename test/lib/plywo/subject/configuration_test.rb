@@ -38,7 +38,7 @@ class PlywoSubjectConfigurationTest < ActiveSupport::TestCase
     end
   end
 
-  test "loads explicit process service with bounded HTTP readiness" do
+  test "loads explicit Ruby process service with bounded HTTP readiness" do
     Dir.mktmpdir do |directory|
       File.write(File.join(directory, "plywo.yml"), <<~YAML)
         version: 1
@@ -46,7 +46,9 @@ class PlywoSubjectConfigurationTest < ActiveSupport::TestCase
           services:
             - name: mock-api
               type: process
-              command: [ruby, script/mock_api.rb]
+              runtime: ruby
+              entrypoint: script/mock_api.rb
+              args: [ready]
               port_env: MOCK_API_PORT
               url_env: MOCK_API_URL
               readiness:
@@ -60,7 +62,9 @@ class PlywoSubjectConfigurationTest < ActiveSupport::TestCase
 
       assert_equal "mock-api", service.name
       assert_equal "process", service.type
-      assert_equal [ "ruby", "script/mock_api.rb" ], service.command
+      assert_equal "ruby", service.runtime
+      assert_equal "script/mock_api.rb", service.entrypoint
+      assert_equal [ "ready" ], service.args
       assert_equal "MOCK_API_PORT", service.port_env
       assert_equal "MOCK_API_URL", service.url_env
       assert_equal "http", service.readiness.type
@@ -104,15 +108,18 @@ class PlywoSubjectConfigurationTest < ActiveSupport::TestCase
     end
   end
 
-  test "rejects shell-string service commands" do
+  test "rejects arbitrary command fields and unsupported service runtimes" do
     Dir.mktmpdir do |directory|
-      File.write(File.join(directory, "plywo.yml"), <<~YAML)
+      path = File.join(directory, "plywo.yml")
+      File.write(path, <<~YAML)
         version: 1
         subject:
           services:
             - name: mock-api
               type: process
-              command: ruby script/mock_api.rb
+              runtime: ruby
+              entrypoint: script/mock_api.rb
+              command: [sh, -c, anything]
               url_env: MOCK_API_URL
               readiness:
                 type: http
@@ -122,27 +129,92 @@ class PlywoSubjectConfigurationTest < ActiveSupport::TestCase
       error = assert_raises(Plywo::Subject::Configuration::Error) do
         Plywo::Subject::Configuration.load(root: directory)
       end
+      assert_match(/Unknown subject.services\[0\] keys: command/, error.message)
 
-      assert_match(/command must be a non-empty sequence/, error.message)
-    end
-  end
-
-  test "rejects duplicate service names" do
-    Dir.mktmpdir do |directory|
-      File.write(File.join(directory, "plywo.yml"), <<~YAML)
+      File.write(path, <<~YAML)
         version: 1
         subject:
           services:
             - name: mock-api
               type: process
-              command: [ruby, one.rb]
+              runtime: shell
+              entrypoint: script/mock_api.rb
+              url_env: MOCK_API_URL
+              readiness:
+                type: http
+                path: /health
+      YAML
+
+      error = assert_raises(Plywo::Subject::Configuration::Error) do
+        Plywo::Subject::Configuration.load(root: directory)
+      end
+      assert_match(/Unsupported subject.services\[0\].runtime/, error.message)
+    end
+  end
+
+  test "rejects entrypoint traversal and malformed args" do
+    Dir.mktmpdir do |directory|
+      path = File.join(directory, "plywo.yml")
+      File.write(path, <<~YAML)
+        version: 1
+        subject:
+          services:
+            - name: mock-api
+              type: process
+              runtime: ruby
+              entrypoint: ../outside.rb
+              url_env: MOCK_API_URL
+              readiness:
+                type: http
+                path: /health
+      YAML
+
+      error = assert_raises(Plywo::Subject::Configuration::Error) do
+        Plywo::Subject::Configuration.load(root: directory)
+      end
+      assert_match(/entrypoint must be a repository-relative path without/, error.message)
+
+      File.write(path, <<~YAML)
+        version: 1
+        subject:
+          services:
+            - name: mock-api
+              type: process
+              runtime: ruby
+              entrypoint: service.rb
+              args: ready
+              url_env: MOCK_API_URL
+              readiness:
+                type: http
+                path: /health
+      YAML
+
+      error = assert_raises(Plywo::Subject::Configuration::Error) do
+        Plywo::Subject::Configuration.load(root: directory)
+      end
+      assert_match(/args must be a sequence of strings/, error.message)
+    end
+  end
+
+  test "rejects duplicate service names and URL exports" do
+    Dir.mktmpdir do |directory|
+      path = File.join(directory, "plywo.yml")
+      File.write(path, <<~YAML)
+        version: 1
+        subject:
+          services:
+            - name: mock-api
+              type: process
+              runtime: ruby
+              entrypoint: one.rb
               url_env: MOCK_API_URL
               readiness:
                 type: http
                 path: /health
             - name: mock-api
               type: process
-              command: [ruby, two.rb]
+              runtime: ruby
+              entrypoint: two.rb
               url_env: OTHER_API_URL
               readiness:
                 type: http
@@ -152,8 +224,34 @@ class PlywoSubjectConfigurationTest < ActiveSupport::TestCase
       error = assert_raises(Plywo::Subject::Configuration::Error) do
         Plywo::Subject::Configuration.load(root: directory)
       end
-
       assert_match(/Duplicate subject.services names: mock-api/, error.message)
+
+      File.write(path, <<~YAML)
+        version: 1
+        subject:
+          services:
+            - name: first-api
+              type: process
+              runtime: ruby
+              entrypoint: one.rb
+              url_env: SHARED_API_URL
+              readiness:
+                type: http
+                path: /health
+            - name: second-api
+              type: process
+              runtime: ruby
+              entrypoint: two.rb
+              url_env: SHARED_API_URL
+              readiness:
+                type: http
+                path: /health
+      YAML
+
+      error = assert_raises(Plywo::Subject::Configuration::Error) do
+        Plywo::Subject::Configuration.load(root: directory)
+      end
+      assert_match(/Duplicate subject.services url_env values: SHARED_API_URL/, error.message)
     end
   end
 
