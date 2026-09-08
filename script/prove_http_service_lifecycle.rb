@@ -61,13 +61,13 @@ module HttpServiceLifecycleProof
 
             body = status == 200 ? "OK" : "NOT READY"
             reason = status == 200 ? "OK" : "Service Unavailable"
-            client.write(
-              "HTTP/1.1 \\#{status} \\#{reason}\\r\\n" \\
-              "Content-Type: text/plain\\r\\n" \\
-              "Content-Length: \\#{body.bytesize}\\r\\n" \\
-              "Connection: close\\r\\n\\r\\n" \\
-              "\\#{body}"
-            )
+            response =
+              "HTTP/1.1 " + status.to_s + " " + reason + "\\r\\n" +
+              "Content-Type: text/plain\\r\\n" +
+              "Content-Length: " + body.bytesize.to_s + "\\r\\n" +
+              "Connection: close\\r\\n\\r\\n" +
+              body
+            client.write(response)
           ensure
             client.close rescue nil
           end
