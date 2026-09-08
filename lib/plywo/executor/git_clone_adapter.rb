@@ -24,12 +24,7 @@ module Plywo
         @repository_capability_provider = repository_capability_provider
         @git_base_url = normalize_git_base_url(git_base_url)
         @runner_factory = runner_factory || lambda do |repository_root:|
-          Plywo::Github::LocalPullRequestRunner.new(
-            root: repository_root,
-            tool_root: @root,
-            fetch_repository: false,
-            command_runner: @command_runner
-          )
+          default_runner(repository_root:)
         end
       end
 
@@ -65,6 +60,35 @@ module Plywo
       end
 
       private
+
+      def default_runner(repository_root:)
+        execution_identity = Plywo::Subject::ExecutionIdentity.from_env
+        runtime_capabilities = Plywo::Subject::RuntimeCapabilities.from_env
+        compose_provider = Plywo::Subject::IsolatedComposeProviderClient.from_env
+
+        if compose_provider
+          runtime_capabilities = runtime_capabilities.with_service_provider(
+            "compose",
+            compose_provider.provider_version
+          )
+        elsif runtime_capabilities.service_provider?("compose")
+          raise Error,
+            "Executor declares Compose capability without a reachable isolated Compose provider"
+        end
+
+        Plywo::Github::LocalPullRequestRunner.new(
+          root: repository_root,
+          tool_root: @root,
+          fetch_repository: false,
+          command_runner: @command_runner,
+          execution_identity:,
+          runtime_capabilities:,
+          service_executor: Plywo::Subject::ServiceExecutor.new(
+            execution_identity:,
+            compose_provider:
+          )
+        )
+      end
 
       def prepare_repository!(repository_root:, repository:, pull_request_number:, baseline_ref:, repository_capability:)
         FileUtils.rm_rf(repository_root)
