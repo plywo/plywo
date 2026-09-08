@@ -5,8 +5,9 @@ module Plywo
     class SetupPlanCompiler
       Error = Class.new(StandardError)
 
-      def initialize(detectors: [ RailsSetupPlanDetector.new ])
+      def initialize(detectors: [ RailsSetupPlanDetector.new ], runtime_capabilities: nil)
         @detectors = detectors.freeze
+        @runtime_capabilities = runtime_capabilities
       end
 
       def call(root:, configuration:)
@@ -22,7 +23,21 @@ module Plywo
           raise Error, "Ambiguous subject setup plan for #{Pathname(root).expand_path}: #{frameworks}"
         end
 
-        plans.first
+        with_executor_capabilities(plans.first)
+      end
+
+      private
+
+      def with_executor_capabilities(plan)
+        return plan unless @runtime_capabilities
+
+        SetupPlan.new(
+          framework: plan.framework,
+          steps: plan.steps,
+          evidence: plan.evidence.merge(
+            "executor_runtime_capabilities" => @runtime_capabilities.to_h
+          )
+        )
       end
     end
   end

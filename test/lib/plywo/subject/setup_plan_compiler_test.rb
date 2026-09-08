@@ -28,6 +28,33 @@ class PlywoSubjectSetupPlanCompilerTest < ActiveSupport::TestCase
     end
   end
 
+  test "records declared executor runtime capabilities in plan evidence" do
+    plan = Plywo::Subject::SetupPlan.new(
+      framework: "rails",
+      steps: [],
+      evidence: { "framework" => "rails" }
+    )
+    capabilities = Plywo::Subject::RuntimeCapabilities.new(
+      runtimes: { ruby: "3.4.10", node: "24.0.0" },
+      package_managers: { pnpm: "10.0.0" }
+    )
+    compiler = Plywo::Subject::SetupPlanCompiler.new(
+      detectors: [ Detector.new(plan:) ],
+      runtime_capabilities: capabilities
+    )
+
+    Dir.mktmpdir("plywo-plan-compiler-") do |directory|
+      compiled = compiler.call(
+        root: Pathname(directory),
+        configuration: Configuration.new(persistence: "auto")
+      )
+
+      assert_equal "rails", compiled.evidence.fetch("framework")
+      assert_equal capabilities.to_h, compiled.evidence.fetch("executor_runtime_capabilities")
+      refute_same plan, compiled
+    end
+  end
+
   test "fails closed when no detector can compile the subject" do
     compiler = Plywo::Subject::SetupPlanCompiler.new(
       detectors: [ Detector.new ]

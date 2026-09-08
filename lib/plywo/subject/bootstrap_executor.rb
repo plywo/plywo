@@ -3,8 +3,9 @@ module Plywo
     class BootstrapExecutor
       Error = Class.new(StandardError)
 
-      def initialize(ruby_bundle_bootstrap:)
+      def initialize(ruby_bundle_bootstrap:, runtime_capabilities:)
         @ruby_bundle_bootstrap = ruby_bundle_bootstrap
+        @runtime_capabilities = runtime_capabilities
       end
 
       def call(root:, setup_plan:)
@@ -21,12 +22,15 @@ module Plywo
       def execute_step(root:, step:)
         case step.operation
         when "ruby.bundle"
+          assert_runtime!("ruby", operation: step.operation)
           assert_ruby_bundle_step!(step)
           @ruby_bundle_bootstrap.call(root:)
         when "javascript.dependencies"
+          assert_javascript_dependencies_step!(step)
+          assert_javascript_capabilities!(step)
           raise Error,
-            "Unsupported bootstrap operation javascript.dependencies: " \
-            "executor does not provide a JavaScript runtime/package-manager capability yet"
+            "Bootstrap operation javascript.dependencies has declared executor capabilities " \
+            "but no typed JavaScript dependency handler is implemented yet"
         else
           raise Error, "Unsupported bootstrap operation #{step.operation.inspect}"
         end
@@ -40,6 +44,43 @@ module Plywo
         raise Error,
           "ruby.bundle setup step must use Gemfile and Gemfile.lock; " \
           "received manifest=#{manifest.inspect} lockfile=#{lockfile.inspect}"
+      end
+
+      def assert_javascript_dependencies_step!(step)
+        manager = step.details.fetch("manager", nil).to_s
+        manifest = step.details.fetch("manifest", nil)
+        lockfile = step.details.fetch("lockfile", nil)
+        frozen_lockfile = step.details.fetch("frozen_lockfile", nil)
+
+        if manager.empty? || manifest != "package.json" || lockfile.to_s.empty? || frozen_lockfile != true
+          raise Error,
+            "javascript.dependencies setup step must declare manager, package.json, lockfile, and frozen_lockfile=true"
+        end
+      end
+
+      def assert_javascript_capabilities!(step)
+        manager = step.details.fetch("manager").to_s
+
+        if manager == "bun"
+          assert_runtime!("bun", operation: step.operation)
+        else
+          assert_runtime!("node", operation: step.operation)
+        end
+        assert_package_manager!(manager, operation: step.operation)
+      end
+
+      def assert_runtime!(name, operation:)
+        return if @runtime_capabilities.runtime?(name)
+
+        raise Error,
+          "Bootstrap operation #{operation} requires executor runtime capability #{name.inspect}"
+      end
+
+      def assert_package_manager!(name, operation:)
+        return if @runtime_capabilities.package_manager?(name)
+
+        raise Error,
+          "Bootstrap operation #{operation} requires executor package-manager capability #{name.inspect}"
       end
 
       def merge_environment!(environment, addition, operation:)
