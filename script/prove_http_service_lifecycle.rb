@@ -78,6 +78,8 @@ module HttpServiceLifecycleProof
     puts "setup_plan_start_operation=#{success.fetch(:start_operation)}"
     puts "setup_plan_healthcheck_operation=#{success.fetch(:healthcheck_operation)}"
     puts "setup_plan_stop_operation=#{success.fetch(:stop_operation)}"
+    puts "service_runtime=#{success.fetch(:runtime)}"
+    puts "service_entrypoint=#{success.fetch(:entrypoint)}"
     puts "service_provenance=explicit"
     puts "dynamic_port_assigned=#{URI(success.fetch(:url)).port.positive?}"
     puts "readiness_before_capture=true"
@@ -105,6 +107,7 @@ module HttpServiceLifecycleProof
       url = nil
       subject_state_dir = nil
       start_operation = healthcheck_operation = stop_operation = nil
+      runtime = entrypoint = nil
 
       lifecycle.open(
         root:,
@@ -119,9 +122,14 @@ module HttpServiceLifecycleProof
         raise "Subject state must exist during capture" unless subject_state_dir.directory?
         raise "Service state must exist during capture" unless service_executor.last_state_dir.directory?
 
-        start_operation = session.setup_plan.steps_for("start_services").fetch(0).operation
+        start_step = session.setup_plan.steps_for("start_services").fetch(0)
+        start_operation = start_step.operation
+        runtime = start_step.details.fetch("runtime")
+        entrypoint = start_step.details.fetch("entrypoint")
         healthcheck_operation = session.setup_plan.steps_for("healthcheck").fetch(0).operation
         stop_operation = session.setup_plan.steps_for("stop_services").fetch(0).operation
+        raise "Expected typed Ruby service runtime" unless runtime == "ruby"
+        raise "Expected repository-relative service entrypoint" unless entrypoint == "service.rb"
 
         response = Net::HTTP.get_response(URI("#{url}/health"))
         raise "Expected healthy configured service during capture" unless response.code == "200"
@@ -144,7 +152,9 @@ module HttpServiceLifecycleProof
         url:,
         start_operation:,
         healthcheck_operation:,
-        stop_operation:
+        stop_operation:,
+        runtime:,
+        entrypoint:
       }
     end
   end
@@ -244,7 +254,9 @@ module HttpServiceLifecycleProof
         services:
           - name: mock-api
             type: process
-            command: [ruby, service.rb, "#{status}"]
+            runtime: ruby
+            entrypoint: service.rb
+            args: ["#{status}"]
             port_env: MOCK_API_PORT
             url_env: MOCK_API_URL
             readiness:
