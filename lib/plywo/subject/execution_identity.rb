@@ -147,7 +147,7 @@ module Plywo
 
         path = Pathname(path)
         FileUtils.mkdir_p(path.dirname)
-        File.open(path, "w") {}
+        File.open(path, "w") { }
         FileUtils.chown(uid, gid, path)
         File.chmod(0o600, path)
       rescue Errno::EPERM, Errno::EACCES => error
