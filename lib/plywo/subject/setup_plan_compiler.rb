@@ -23,10 +23,59 @@ module Plywo
           raise Error, "Ambiguous subject setup plan for #{Pathname(root).expand_path}: #{frameworks}"
         end
 
-        with_executor_capabilities(plans.first)
+        plan = with_explicit_services(plans.first, configuration:)
+        with_executor_capabilities(plan)
       end
 
       private
+
+      def with_explicit_services(plan, configuration:)
+        services = configuration.services
+        return plan if services.empty?
+
+        SetupPlan.new(
+          framework: plan.framework,
+          steps: plan.steps + services.flat_map { |service| service_steps(service) },
+          evidence: plan.evidence.merge(
+            "explicit_services" => services.map(&:name)
+          )
+        )
+      end
+
+      def service_steps(service)
+        [
+          {
+            phase: "start_services",
+            operation: "process.start",
+            provenance: "explicit",
+            details: {
+              name: service.name,
+              command: service.command,
+              port_env: service.port_env,
+              url_env: service.url_env
+            }
+          },
+          {
+            phase: "healthcheck",
+            operation: "http.wait_ready",
+            provenance: "explicit",
+            details: {
+              name: service.name,
+              url_env: service.url_env,
+              path: service.readiness.path,
+              timeout_seconds: service.readiness.timeout_seconds
+            }
+          },
+          {
+            phase: "stop_services",
+            operation: "process.stop",
+            provenance: "explicit",
+            details: {
+              name: service.name
+            }
+          }
+        ]
+      end
 
       def with_executor_capabilities(plan)
         return plan unless @runtime_capabilities
