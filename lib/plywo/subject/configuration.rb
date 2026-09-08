@@ -14,18 +14,19 @@ module Plywo
       PERSISTENCE_VALUES = %w[auto postgresql sqlite].freeze
       SETUP_MODE_VALUES = %w[auto].freeze
       SERVICE_TYPE_VALUES = %w[process].freeze
+      SERVICE_RUNTIME_VALUES = %w[ruby].freeze
       READINESS_TYPE_VALUES = %w[http].freeze
       TOP_LEVEL_KEYS = %w[version scenario subject].freeze
       SCENARIO_KEYS = %w[path].freeze
       SUBJECT_KEYS = %w[persistence setup services].freeze
       SETUP_KEYS = %w[mode].freeze
-      SERVICE_KEYS = %w[name type command port_env url_env readiness].freeze
+      SERVICE_KEYS = %w[name type runtime entrypoint args port_env url_env readiness].freeze
       READINESS_KEYS = %w[type path timeout_seconds].freeze
       SERVICE_NAME_PATTERN = /\A[a-z][a-z0-9_-]*\z/
       ENV_KEY_PATTERN = /\A[A-Z_][A-Z0-9_]*\z/
 
       Readiness = Data.define(:type, :path, :timeout_seconds)
-      Service = Data.define(:name, :type, :command, :port_env, :url_env, :readiness)
+      Service = Data.define(:name, :type, :runtime, :entrypoint, :args, :port_env, :url_env, :readiness)
 
       attr_reader :scenario_path, :persistence, :setup_mode, :services, :source_path
 
@@ -96,9 +97,14 @@ module Plywo
             parse_service(service, index:)
           end
 
-          duplicate_names = services.group_by(&:name).filter_map { |name, items| name if items.length > 1 }
+          duplicate_names = duplicates(services.map(&:name))
           unless duplicate_names.empty?
-            raise Error, "Duplicate subject.services names: #{duplicate_names.sort.join(", ")}"
+            raise Error, "Duplicate subject.services names: #{duplicate_names.join(", ")}"
+          end
+
+          duplicate_url_envs = duplicates(services.map(&:url_env))
+          unless duplicate_url_envs.empty?
+            raise Error, "Duplicate subject.services url_env values: #{duplicate_url_envs.join(", ")}"
           end
 
           services.freeze
@@ -118,9 +124,17 @@ module Plywo
             raise Error, "Unsupported #{name}.type #{type.inspect}; expected one of #{SERVICE_TYPE_VALUES.join(", ")}"
           end
 
-          command = value.fetch("command") { raise Error, "#{name} must declare command as an argv sequence" }
-          unless command.is_a?(Array) && command.any? && command.all? { |item| item.is_a?(String) && !item.empty? }
-            raise Error, "#{name}.command must be a non-empty sequence of non-empty strings"
+          runtime = value.fetch("runtime") { raise Error, "#{name} must declare runtime" }.to_s
+          unless SERVICE_RUNTIME_VALUES.include?(runtime)
+            raise Error, "Unsupported #{name}.runtime #{runtime.inspect}; expected one of #{SERVICE_RUNTIME_VALUES.join(", ")}"
+          end
+
+          entrypoint = value.fetch("entrypoint") { raise Error, "#{name} must declare entrypoint" }
+          validate_relative_entrypoint!(entrypoint, name: "#{name}.entrypoint")
+
+          args = value.fetch("args", [])
+          unless args.is_a?(Array) && args.all? { |item| item.is_a?(String) }
+            raise Error, "#{name}.args must be a sequence of strings"
           end
 
           port_env = value.fetch("port_env", DEFAULT_SERVICE_PORT_ENV).to_s
@@ -128,6 +142,9 @@ module Plywo
 
           url_env = value.fetch("url_env") { raise Error, "#{name} must declare url_env" }.to_s
           validate_env_key!(url_env, name: "#{name}.url_env")
+          if port_env == url_env
+            raise Error, "#{name}.port_env and #{name}.url_env must be different"
+          end
 
           readiness = parse_readiness(
             value.fetch("readiness") { raise Error, "#{name} must declare readiness" },
@@ -137,7 +154,9 @@ module Plywo
           Service.new(
             name: service_name,
             type:,
-            command: command.map(&:dup).freeze,
+            runtime:,
+            entrypoint: entrypoint.dup.freeze,
+            args: args.map(&:dup).freeze,
             port_env:,
             url_env:,
             readiness:
@@ -165,6 +184,10 @@ module Plywo
           Readiness.new(type:, path:, timeout_seconds:)
         end
 
+        def duplicates(values)
+          values.group_by(&:itself).filter_map { |value, items| value if items.length > 1 }.sort
+        end
+
         def validate_mapping!(value, name:, allowed_keys:)
           raise Error, "#{name} must be a mapping" unless value.is_a?(Hash)
 
@@ -179,6 +202,17 @@ module Plywo
           return if path.is_a?(String) && path.start_with?("/")
 
           raise Error, "scenario.path must be an absolute HTTP path starting with /"
+        end
+
+        def validate_relative_entrypoint!(value, name:)
+          unless value.is_a?(String) && !value.empty?
+            raise Error, "#{name} must be a non-empty repository-relative path"
+          end
+
+          path = Pathname(value)
+          if path.absolute? || path.each_filename.any? { |component| component == ".." }
+            raise Error, "#{name} must be a repository-relative path without .."
+          end
         end
 
         def validate_env_key!(value, name:)
