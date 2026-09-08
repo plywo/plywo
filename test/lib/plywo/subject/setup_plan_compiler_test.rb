@@ -35,7 +35,9 @@ class PlywoSubjectSetupPlanCompilerTest < ActiveSupport::TestCase
     service = Plywo::Subject::Configuration::Service.new(
       name: "mock-api",
       type: "process",
-      command: [ "ruby", "script/mock_api.rb" ].freeze,
+      runtime: "ruby",
+      entrypoint: "script/mock_api.rb",
+      args: [ "ready" ].freeze,
       port_env: "MOCK_API_PORT",
       url_env: "MOCK_API_URL",
       readiness: Plywo::Subject::Configuration::Readiness.new(
@@ -58,7 +60,9 @@ class PlywoSubjectSetupPlanCompilerTest < ActiveSupport::TestCase
 
       start = compiled.steps_for("start_services").fetch(0)
       assert_equal "explicit", start.provenance
-      assert_equal [ "ruby", "script/mock_api.rb" ], start.details.fetch("command")
+      assert_equal "ruby", start.details.fetch("runtime")
+      assert_equal "script/mock_api.rb", start.details.fetch("entrypoint")
+      assert_equal [ "ready" ], start.details.fetch("args")
       assert_equal "MOCK_API_PORT", start.details.fetch("port_env")
       assert_equal "MOCK_API_URL", start.details.fetch("url_env")
 
