@@ -3,13 +3,13 @@
     {
       "warning_type": "Command Injection",
       "warning_code": 14,
-      "fingerprint": "29acf3ad63ed9322648149e4bd447fa2eebf4696cade926c520ce5bcd9932368",
+      "fingerprint": "c12048d8fea25843fe3a2dae311062b6ec176c0ff70889074a1797f0860d0cb2",
       "check_name": "Execute",
       "message": "Possible command injection",
       "file": "lib/plywo/subject/service_executor.rb",
-      "line": 140,
+      "line": 164,
       "link": "https://brakemanscanner.org/docs/warning_types/command_injection/",
-      "code": "Process.spawn(safe_inherited_environment.merge(env).merge(step.details.fetch(\"port_env\") => allocate_port.to_s, step.details.fetch(\"url_env\") => (\"http://127.0.0.1:#{allocate_port}\")), RbConfig.ruby, \"--\", resolve_entrypoint(:root => root, :value => step.details.fetch(\"entrypoint\"), :service_name => step.details.fetch(\"name\")).to_s, *step.details.fetch(\"args\"), :chdir => root.to_s, :out => state_dir.join(\"#{step.details.fetch(\"name\")}.stdout.log\").to_s, :err => state_dir.join(\"#{step.details.fetch(\"name\")}.stderr.log\").to_s, :unsetenv_others => true)",
+      "code": "Process.spawn(safe_inherited_environment.merge(env).merge(step.details.fetch(\"port_env\") => allocate_port.to_s, step.details.fetch(\"url_env\") => (\"http://#{\"127.0.0.1\"}:#{allocate_port}\")), RbConfig.ruby, \"--\", resolve_entrypoint(:root => root, :value => step.details.fetch(\"entrypoint\"), :service_name => step.details.fetch(\"name\")).to_s, *step.details.fetch(\"args\"), :chdir => root.to_s, :out => state_dir.join(\"#{step.details.fetch(\"name\")}.stdout.log\").to_s, :err => state_dir.join(\"#{step.details.fetch(\"name\")}.stderr.log\").to_s, :unsetenv_others => true)",
       "render_path": null,
       "location": {
         "type": "method",
@@ -24,13 +24,13 @@
     {
       "warning_type": "Command Injection",
       "warning_code": 14,
-      "fingerprint": "59aa5ab645a7dca1d2831b5c3192b144896642699bb1084d96285b2f99ce1b97",
+      "fingerprint": "198ea485864679ccacb0b56769f4dc699c6aec5fb4705b490592a4902ed34ac1",
       "check_name": "Execute",
       "message": "Possible command injection",
       "file": "lib/plywo/subject/service_executor.rb",
-      "line": 154,
+      "line": 176,
       "link": "https://brakemanscanner.org/docs/warning_types/command_injection/",
-      "code": "Process.spawn(safe_inherited_environment.merge(env).merge(step.details.fetch(\"port_env\") => allocate_port.to_s, step.details.fetch(\"url_env\") => (\"http://127.0.0.1:#{allocate_port}\")), \"node\", \"--\", resolve_entrypoint(:root => root, :value => step.details.fetch(\"entrypoint\"), :service_name => step.details.fetch(\"name\")).to_s, *step.details.fetch(\"args\"), :chdir => root.to_s, :out => state_dir.join(\"#{step.details.fetch(\"name\")}.stdout.log\").to_s, :err => state_dir.join(\"#{step.details.fetch(\"name\")}.stderr.log\").to_s, :unsetenv_others => true)",
+      "code": "Process.spawn(safe_inherited_environment.merge(env).merge(step.details.fetch(\"port_env\") => allocate_port.to_s, step.details.fetch(\"url_env\") => (\"http://#{\"127.0.0.1\"}:#{allocate_port}\")), \"node\", \"--\", resolve_entrypoint(:root => root, :value => step.details.fetch(\"entrypoint\"), :service_name => step.details.fetch(\"name\")).to_s, *step.details.fetch(\"args\"), :chdir => root.to_s, :out => state_dir.join(\"#{step.details.fetch(\"name\")}.stdout.log\").to_s, :err => state_dir.join(\"#{step.details.fetch(\"name\")}.stderr.log\").to_s, :unsetenv_others => true)",
       "render_path": null,
       "location": {
         "type": "method",
