@@ -17,6 +17,14 @@ module Plywo
       PROVIDER_NAME = IsolatedComposeProviderClient::PROVIDER_NAME
       PROVIDER_VERSION = "1".freeze
       MAX_REQUEST_BYTES = 256 * 1024
+      START_DETAIL_KEYS = %w[
+        name
+        manifest
+        service
+        target_port
+        url_scheme
+        url_env
+      ].freeze
 
       Record = Data.define(:handle, :workspace)
 
@@ -33,9 +41,11 @@ module Plywo
         prepare_socket!
         loop do
           client = @server.accept
-          handle_client(client)
-        ensure
-          client&.close
+          begin
+            handle_client(client)
+          ensure
+            client.close
+          end
         end
       ensure
         shutdown
@@ -131,6 +141,21 @@ module Plywo
         unless manifest.is_a?(String) && details.is_a?(Hash)
           raise Error, "Compose provider start requires manifest text and typed details"
         end
+        if role.empty? || role.bytesize > 128 || execution_id.bytesize > 128
+          raise Error, "Compose provider execution ownership metadata is invalid"
+        end
+
+        unknown_details = details.keys.map(&:to_s) - START_DETAIL_KEYS
+        unless unknown_details.empty?
+          raise Error,
+            "Compose provider start uses unsupported detail keys: #{unknown_details.sort.join(", ")}"
+        end
+        required_details = START_DETAIL_KEYS - [ "manifest" ]
+        missing_details = required_details.reject { |key| details.key?(key) }
+        unless missing_details.empty?
+          raise Error,
+            "Compose provider start is missing detail keys: #{missing_details.sort.join(", ")}"
+        end
 
         workspace = Pathname(Dir.mktmpdir("plywo-compose-authority-"))
         manifest_path = workspace.join("compose.yml")
@@ -144,7 +169,6 @@ module Plywo
           details: details.merge("manifest" => "compose.yml")
         )
         provider_role = [ execution_id, role ].reject(&:empty?).join("-")
-        provider_role = "subject" if provider_role.empty?
         started = @provider.start(root: workspace, role: provider_role, step:)
         handle_id = SecureRandom.hex(16)
         @records[handle_id] = Record.new(handle: started.handle, workspace:)
