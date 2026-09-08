@@ -3,6 +3,7 @@ require "fileutils"
 require "json"
 require "open3"
 require "rbconfig"
+require_relative "../subject/execution_identity"
 
 module Plywo
   module Github
