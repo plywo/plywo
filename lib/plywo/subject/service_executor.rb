@@ -25,7 +25,7 @@ module Plywo
       SUPPORTED_START_OPERATION = "process.start".freeze
       SUPPORTED_HEALTHCHECK_OPERATION = "http.wait_ready".freeze
       SUPPORTED_STOP_OPERATION = "process.stop".freeze
-      SUPPORTED_RUNTIME = "ruby".freeze
+      SUPPORTED_RUNTIMES = %w[ruby node].freeze
       STOP_TIMEOUT_SECONDS = 2
       READINESS_INTERVAL_SECONDS = 0.05
 
@@ -123,7 +123,7 @@ module Plywo
         if env.key?(url_env)
           raise Error, "Service #{name.inspect} cannot overwrite capture environment #{url_env.inspect}"
         end
-        unless runtime == SUPPORTED_RUNTIME
+        unless SUPPORTED_RUNTIMES.include?(runtime)
           raise Error, "Unsupported service runtime #{runtime.inspect} for #{name.inspect}"
         end
 
@@ -136,17 +136,32 @@ module Plywo
         stdout_path = state_dir.join("#{name}.stdout.log")
         stderr_path = state_dir.join("#{name}.stderr.log")
 
-        pid = Process.spawn(
-          service_env,
-          RbConfig.ruby,
-          "--",
-          entrypoint.to_s,
-          *args,
-          chdir: root.to_s,
-          out: stdout_path.to_s,
-          err: stderr_path.to_s,
-          unsetenv_others: true
-        )
+        pid = case runtime
+        when "ruby"
+          Process.spawn(
+            service_env,
+            RbConfig.ruby,
+            "--",
+            entrypoint.to_s,
+            *args,
+            chdir: root.to_s,
+            out: stdout_path.to_s,
+            err: stderr_path.to_s,
+            unsetenv_others: true
+          )
+        when "node"
+          Process.spawn(
+            service_env,
+            "node",
+            "--",
+            entrypoint.to_s,
+            *args,
+            chdir: root.to_s,
+            out: stdout_path.to_s,
+            err: stderr_path.to_s,
+            unsetenv_others: true
+          )
+        end
 
         RunningService.new(
           name:,
