@@ -14,8 +14,20 @@ module Plywo
         "bun.lockb" => "bun"
       }.freeze
       SUPPORTED_MANAGERS = SUPPORTED_LOCKFILES.values.uniq.freeze
+      EXACT_VERSION_PATTERN = /\A\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\z/
+      INTEGRITY_PATTERN = /\Asha(?:224|256|384|512)\.[0-9a-fA-F]+\z/
 
-      Detection = Data.define(:manager, :manifest, :lockfile, :package_manager_declaration, :yarn_generation) do
+      PackageManagerDeclaration = Data.define(:manager, :version, :integrity)
+
+      Detection = Data.define(
+        :manager,
+        :manifest,
+        :lockfile,
+        :package_manager_declaration,
+        :package_manager_version,
+        :package_manager_integrity,
+        :yarn_generation
+      ) do
         def bootstrap_step
           SetupPlan::Step.new(
             phase: "bootstrap",
@@ -26,6 +38,7 @@ module Plywo
               manifest:,
               lockfile:,
               frozen_lockfile: true,
+              package_manager_version:,
               yarn_generation:
             }.compact
           )
@@ -37,6 +50,8 @@ module Plywo
             "javascript_package_manager" => manager,
             "javascript_lockfile" => lockfile,
             "package_manager_declaration" => package_manager_declaration,
+            "package_manager_version" => package_manager_version,
+            "package_manager_integrity" => package_manager_integrity,
             "yarn_generation" => yarn_generation
           }.compact
         end
@@ -50,14 +65,17 @@ module Plywo
         payload = parse_manifest!(manifest)
         lockfile = detect_lockfile!(root)
         manager = SUPPORTED_LOCKFILES.fetch(lockfile)
-        declaration = payload["packageManager"]
+        raw_declaration = payload["packageManager"]
+        declaration = parse_package_manager_declaration!(raw_declaration)
         assert_declaration_matches!(declaration:, manager:, lockfile:)
 
         Detection.new(
           manager:,
           manifest: "package.json",
           lockfile:,
-          package_manager_declaration: declaration,
+          package_manager_declaration: raw_declaration,
+          package_manager_version: declaration&.version,
+          package_manager_integrity: declaration&.integrity,
           yarn_generation: manager == "yarn" ? detect_yarn_generation!(root.join(lockfile)) : nil
         )
       end
@@ -92,6 +110,42 @@ module Plywo
         lockfiles.fetch(0)
       end
 
+      def parse_package_manager_declaration!(raw_declaration)
+        return if raw_declaration.nil?
+
+        declaration = raw_declaration.to_s
+        manager, separator, version_with_integrity = declaration.partition("@")
+        unless separator == "@" && !manager.empty? && !version_with_integrity.empty?
+          raise Error,
+            "Invalid package.json packageManager #{raw_declaration.inspect}; " \
+            "expected <manager>@<exact-version>"
+        end
+
+        unless SUPPORTED_MANAGERS.include?(manager)
+          raise Error, "Unsupported package.json packageManager #{raw_declaration.inspect}"
+        end
+
+        version, integrity = split_version_and_integrity(version_with_integrity)
+        unless version.match?(EXACT_VERSION_PATTERN)
+          raise Error,
+            "package.json packageManager must pin an exact version; " \
+            "received #{raw_declaration.inspect}"
+        end
+
+        PackageManagerDeclaration.new(manager:, version:, integrity:)
+      end
+
+      def split_version_and_integrity(value)
+        version, separator, integrity = value.partition("+")
+        return [ version, nil ] if separator.empty?
+
+        unless integrity.match?(INTEGRITY_PATTERN)
+          raise Error, "Invalid package.json packageManager integrity #{integrity.inspect}"
+        end
+
+        [ version, integrity ]
+      end
+
       def detect_yarn_generation!(lockfile)
         contents = lockfile.read
         return "classic" if contents.match?(/^# yarn lockfile v1\s*$/)
@@ -103,16 +157,11 @@ module Plywo
       end
 
       def assert_declaration_matches!(declaration:, manager:, lockfile:)
-        return if declaration.nil?
-
-        declared_manager = declaration.to_s.split("@", 2).first
-        unless SUPPORTED_MANAGERS.include?(declared_manager)
-          raise Error, "Unsupported package.json packageManager #{declaration.inspect}"
-        end
-        return if declared_manager == manager
+        return unless declaration
+        return if declaration.manager == manager
 
         raise Error,
-          "package.json packageManager declares #{declared_manager} but #{lockfile} selects #{manager}"
+          "package.json packageManager declares #{declaration.manager} but #{lockfile} selects #{manager}"
       end
     end
   end

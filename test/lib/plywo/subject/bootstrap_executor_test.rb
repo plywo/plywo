@@ -133,7 +133,56 @@ class PlywoSubjectBootstrapExecutorTest < ActiveSupport::TestCase
     assert_empty javascript_bootstrap.calls
   end
 
-  test "declared JavaScript capabilities dispatch to the typed handler" do
+  test "JavaScript bootstrap fails before install when packageManager version mismatches executor capability" do
+    javascript_bootstrap = RecordingJavascriptBootstrap.new
+    executor = bootstrap_executor(
+      javascript_bootstrap:,
+      runtime_capabilities: capabilities(
+        runtimes: { "ruby" => "3.4.10", "node" => "24.20.0" },
+        package_managers: { "pnpm" => "10.16.0" }
+      )
+    )
+    plan = javascript_plan(
+      manager: "pnpm",
+      lockfile: "pnpm-lock.yaml",
+      package_manager_version: "10.15.0"
+    )
+
+    error = assert_raises(Plywo::Subject::BootstrapExecutor::Error) do
+      executor.call(root: Pathname("/tmp/customer"), setup_plan: plan)
+    end
+
+    assert_equal(
+      "Bootstrap operation javascript.dependencies requires pnpm@10.15.0, " \
+      "but executor declares pnpm@10.16.0",
+      error.message
+    )
+    assert_empty javascript_bootstrap.calls
+  end
+
+  test "JavaScript bootstrap dispatches when packageManager version matches executor capability" do
+    javascript_bootstrap = RecordingJavascriptBootstrap.new
+    executor = bootstrap_executor(
+      javascript_bootstrap:,
+      runtime_capabilities: capabilities(
+        runtimes: { "ruby" => "3.4.10", "node" => "24.20.0" },
+        package_managers: { "pnpm" => "10.15.0" }
+      )
+    )
+    plan = javascript_plan(
+      manager: "pnpm",
+      lockfile: "pnpm-lock.yaml",
+      package_manager_version: "10.15.0"
+    )
+    root = Pathname("/tmp/customer")
+
+    executor.call(root:, setup_plan: plan)
+
+    assert_equal 1, javascript_bootstrap.calls.length
+    assert_equal root, javascript_bootstrap.calls.first.fetch(:root)
+  end
+
+  test "declared JavaScript capabilities dispatch to the typed handler when packageManager is unpinned" do
     javascript_bootstrap = RecordingJavascriptBootstrap.new
     executor = bootstrap_executor(
       javascript_bootstrap:,
@@ -221,18 +270,21 @@ class PlywoSubjectBootstrapExecutorTest < ActiveSupport::TestCase
     Plywo::Subject::RuntimeCapabilities.new(runtimes:, package_managers:)
   end
 
-  def javascript_plan(manager:, lockfile:)
+  def javascript_plan(manager:, lockfile:, package_manager_version: nil)
+    details = {
+      manager:,
+      manifest: "package.json",
+      lockfile:,
+      frozen_lockfile: true
+    }
+    details[:package_manager_version] = package_manager_version if package_manager_version
+
     setup_plan(
       {
         phase: "bootstrap",
         operation: "javascript.dependencies",
         provenance: "detected",
-        details: {
-          manager:,
-          manifest: "package.json",
-          lockfile:,
-          frozen_lockfile: true
-        }
+        details:
       }
     )
   end
