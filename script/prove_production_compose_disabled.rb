@@ -1,6 +1,5 @@
 #!/usr/bin/env ruby
 
-require "open3"
 require "pathname"
 
 TOOL_ROOT = Pathname(__dir__).join("..").expand_path.freeze
@@ -11,8 +10,10 @@ if capabilities.service_provider?("compose")
   raise "Production executor must not declare Compose until it has an isolated service-provider boundary"
 end
 
-_stdout, _stderr, status = Open3.capture3("sh", "-c", "command -v docker")
-raise "Production executor image must not expose Docker CLI to customer-code processes" if status.success?
+docker_present = ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).any? do |directory|
+  File.executable?(File.join(directory, "docker"))
+end
+raise "Production executor image must not expose Docker CLI to customer-code processes" if docker_present
 
 puts "Production Compose isolation proof"
 puts "compose_service_provider_declared=false"
