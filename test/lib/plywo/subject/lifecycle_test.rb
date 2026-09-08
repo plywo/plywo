@@ -84,7 +84,7 @@ class PlywoSubjectLifecycleTest < ActiveSupport::TestCase
     end
 
     assert_equal [
-      :bootstrap,
+      [ :bootstrap, nil ],
       [ :discover, { "FROM_BOOTSTRAP" => "1" } ],
       :prepare,
       :start_services,
@@ -110,8 +110,8 @@ class PlywoSubjectLifecycleTest < ActiveSupport::TestCase
       ]
     )
     compiler = RecordingSetupPlanCompiler.new(events:, setup_plan:)
-    bootstrap = lambda do |root:|
-      events << :bootstrap
+    bootstrap = lambda do |root:, setup_plan:|
+      events << [ :bootstrap, setup_plan ]
       { "FROM_BOOTSTRAP" => "1" }
     end
     lifecycle = Plywo::Subject::Lifecycle.new(
@@ -138,7 +138,7 @@ class PlywoSubjectLifecycleTest < ActiveSupport::TestCase
     assert_same setup_configuration, discovery.configuration
     assert_equal [
       :compile_setup_plan,
-      :bootstrap,
+      [ :bootstrap, setup_plan ],
       [ :discover, { "FROM_BOOTSTRAP" => "1" } ],
       :prepare,
       :start_services,
@@ -165,7 +165,7 @@ class PlywoSubjectLifecycleTest < ActiveSupport::TestCase
 
     assert_equal "healthcheck failed", error.message
     assert_equal [
-      :bootstrap,
+      [ :bootstrap, nil ],
       [ :discover, { "FROM_BOOTSTRAP" => "1" } ],
       :prepare,
       :start_services,
@@ -190,7 +190,7 @@ class PlywoSubjectLifecycleTest < ActiveSupport::TestCase
     end
 
     assert_equal [
-      :bootstrap,
+      [ :bootstrap, nil ],
       [ :discover, { "FROM_BOOTSTRAP" => "1" } ],
       :prepare,
       :cleanup
@@ -200,8 +200,8 @@ class PlywoSubjectLifecycleTest < ActiveSupport::TestCase
   private
 
   def lifecycle_for(events:, environment:)
-    bootstrap = lambda do |root:|
-      events << :bootstrap
+    bootstrap = lambda do |root:, setup_plan:|
+      events << [ :bootstrap, setup_plan ]
       { "FROM_BOOTSTRAP" => "1" }
     end
     discovery = RecordingDiscovery.new(events:, environment:)
