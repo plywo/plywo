@@ -60,13 +60,14 @@ module Plywo
 
       def assert_javascript_capabilities!(step)
         manager = step.details.fetch("manager").to_s
+        requested_version = step.details.fetch("package_manager_version", nil)&.to_s
 
         if manager == "bun"
           assert_runtime!("bun", operation: step.operation)
         else
           assert_runtime!("node", operation: step.operation)
         end
-        assert_package_manager!(manager, operation: step.operation)
+        assert_package_manager!(manager, operation: step.operation, requested_version:)
       end
 
       def assert_javascript_handler!
@@ -82,11 +83,20 @@ module Plywo
           "Bootstrap operation #{operation} requires executor runtime capability #{name.inspect}"
       end
 
-      def assert_package_manager!(name, operation:)
-        return if @runtime_capabilities.package_manager?(name)
+      def assert_package_manager!(name, operation:, requested_version: nil)
+        unless @runtime_capabilities.package_manager?(name)
+          raise Error,
+            "Bootstrap operation #{operation} requires executor package-manager capability #{name.inspect}"
+        end
+
+        return if requested_version.nil? || requested_version.empty?
+
+        executor_version = @runtime_capabilities.package_manager_version(name)
+        return if executor_version == requested_version
 
         raise Error,
-          "Bootstrap operation #{operation} requires executor package-manager capability #{name.inspect}"
+          "Bootstrap operation #{operation} requires #{name}@#{requested_version}, " \
+          "but executor declares #{name}@#{executor_version}"
       end
 
       def merge_environment!(environment, addition, operation:)
