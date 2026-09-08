@@ -2,6 +2,7 @@ require "digest"
 require "fileutils"
 require "pathname"
 require "rbconfig"
+require_relative "execution_identity"
 
 module Plywo
   module Subject
