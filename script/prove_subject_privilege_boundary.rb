@@ -19,18 +19,13 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
   secret.write("provider-authority")
   secret.chmod(0o600)
 
-  ownership_guard = root.join("ownership-guard.txt")
-  ownership_guard.write("outside-workspace")
-  ownership_before = ownership_guard.stat
-  workspace.join("escape-link").make_symlink(ownership_guard)
-
   probe = workspace.join("probe.rb")
   probe.write(<<~'RUBY')
     require "json"
 
-    secret_path = ARGV.fetch(0)
-    secret_readable = begin
-      File.read(secret_path)
+    target_path = ARGV.fetch(0)
+    target_readable = begin
+      File.read(target_path)
       true
     rescue Errno::EACCES, Errno::EPERM
       false
@@ -42,7 +37,7 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
       home: ENV["HOME"],
       user: ENV["USER"],
       logname: ENV["LOGNAME"],
-      secret_readable: secret_readable
+      target_readable: target_readable
     )
   RUBY
 
@@ -89,11 +84,6 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
 
   identity.prepare_tree(workspace)
 
-  ownership_after = ownership_guard.stat
-  unless [ ownership_after.uid, ownership_after.gid ] == [ ownership_before.uid, ownership_before.gid ]
-    raise "subject workspace ownership followed a symlink outside the workspace"
-  end
-
   runner = Plywo::Github::LocalPullRequestRunner::CommandRunner.new(
     execution_identity: identity
   )
@@ -113,7 +103,7 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
   raise "subject HOME was overrideable: #{result.inspect}" unless result.fetch("home") == identity.home
   raise "subject USER was overrideable: #{result.inspect}" unless result.fetch("user") == identity.user
   raise "subject LOGNAME was overrideable: #{result.inspect}" unless result.fetch("logname") == identity.user
-  raise "subject runtime could read provider authority material" if result.fetch("secret_readable")
+  raise "subject runtime could read provider authority material" if result.fetch("target_readable")
 
   plan = Plywo::Subject::SetupPlan.new(
     framework: "rails",
@@ -188,10 +178,54 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
     )
   end
 
+  baseline = root.join("baseline")
+  candidate = root.join("candidate")
+  baseline.mkdir
+  candidate.mkdir
+  baseline_marker = baseline.join("baseline-marker.txt")
+  candidate_marker = candidate.join("candidate-marker.txt")
+  baseline_marker.write("baseline")
+  candidate_marker.write("candidate")
+
+  identity.seal_tree(candidate)
+  identity.prepare_tree(baseline)
+  baseline_probe = JSON.parse(
+    runner.call(
+      env: {},
+      command: [ RbConfig.ruby, probe.to_s, candidate_marker.to_s ],
+      chdir: baseline.to_s
+    )
+  )
+  raise "baseline could read sealed candidate workspace" if baseline_probe.fetch("target_readable")
+
+  identity.seal_tree(baseline)
+  identity.prepare_tree(candidate)
+  candidate_probe = JSON.parse(
+    runner.call(
+      env: {},
+      command: [ RbConfig.ruby, probe.to_s, baseline_marker.to_s ],
+      chdir: candidate.to_s
+    )
+  )
+  raise "candidate could read sealed baseline workspace" if candidate_probe.fetch("target_readable")
+  identity.seal_tree(candidate)
+
+  symlink_target = root.join("outside-owner-proof.txt")
+  symlink_target.write("outside")
+  original_owner = [ symlink_target.stat.uid, symlink_target.stat.gid ]
+  symlink_workspace = root.join("symlink-workspace")
+  symlink_workspace.mkdir
+  File.symlink(symlink_target, symlink_workspace.join("outside-link"))
+  identity.prepare_tree(symlink_workspace)
+  changed_owner = [ symlink_target.stat.uid, symlink_target.stat.gid ]
+  raise "workspace ownership followed a symlink outside the workspace" unless changed_owner == original_owner
+  identity.seal_tree(symlink_workspace)
+
   puts "subject_privilege_boundary=ok"
   puts "subject_uid=#{identity.uid}"
   puts "subject_gid=#{identity.gid}"
-  puts "workspace_symlink_target_ownership_unchanged=true"
   puts "capture_provider_authority_readable=false"
   puts "service_provider_authority_readable=false"
+  puts "baseline_candidate_cross_readable=false"
+  puts "workspace_chown_followed_symlink=false"
 end
