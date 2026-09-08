@@ -19,7 +19,7 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
   secret.chmod(0o600)
 
   probe = workspace.join("probe.rb")
-  probe.write(<<~RUBY)
+  probe.write(<<~'RUBY')
     require "json"
 
     secret_path = ARGV.fetch(0)
@@ -41,7 +41,7 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
   RUBY
 
   service = workspace.join("service.rb")
-  service.write(<<~RUBY)
+  service.write(<<~'RUBY')
     require "json"
     require "socket"
 
@@ -70,7 +70,10 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
     loop do
       socket = server.accept
       request_line = socket.gets.to_s
-      socket.gets until $_ == "\r\n" || $_.nil?
+      loop do
+        header = socket.gets
+        break if header.nil? || header == "\r\n"
+      end
       response_body = request_line.include?("/health") ? body : "not-found"
       status = request_line.include?("/health") ? "200 OK" : "404 Not Found"
       socket.write("HTTP/1.1 #{status}\r\nContent-Length: #{response_body.bytesize}\r\nConnection: close\r\n\r\n#{response_body}")
