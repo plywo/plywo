@@ -32,8 +32,8 @@ module Plywo
 
           Bundler.with_unbundled_env do
             child_env = safe_inherited_environment
-              .merge(@execution_identity.environment)
               .merge(env.transform_keys(&:to_s))
+              .merge(@execution_identity.environment)
             stdout, stderr, status = Open3.capture3(
               child_env,
               *command,
