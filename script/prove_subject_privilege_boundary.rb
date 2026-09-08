@@ -97,10 +97,11 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
     chdir: workspace.to_s
   )
   result = JSON.parse(output)
+  workspace_home = identity.runtime_home(workspace).to_s
 
   raise "subject runtime uid mismatch: #{result.inspect}" unless result.fetch("euid") == identity.uid
   raise "subject runtime gid mismatch: #{result.inspect}" unless result.fetch("egid") == identity.gid
-  raise "subject HOME was overrideable: #{result.inspect}" unless result.fetch("home") == identity.home
+  raise "subject HOME was not worktree-local: #{result.inspect}" unless result.fetch("home") == workspace_home
   raise "subject USER was overrideable: #{result.inspect}" unless result.fetch("user") == identity.user
   raise "subject LOGNAME was overrideable: #{result.inspect}" unless result.fetch("logname") == identity.user
   raise "subject runtime could read provider authority material" if result.fetch("target_readable")
@@ -164,7 +165,7 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
     service_result = JSON.parse(Net::HTTP.get(uri))
     raise "service runtime uid mismatch: #{service_result.inspect}" unless service_result.fetch("euid") == identity.uid
     raise "service runtime gid mismatch: #{service_result.inspect}" unless service_result.fetch("egid") == identity.gid
-    raise "service HOME mismatch: #{service_result.inspect}" unless service_result.fetch("home") == identity.home
+    raise "service HOME was not worktree-local: #{service_result.inspect}" unless service_result.fetch("home") == workspace_home
     raise "service USER mismatch: #{service_result.inspect}" unless service_result.fetch("user") == identity.user
     raise "service runtime could read provider authority material" if service_result.fetch("secret_readable")
   ensure
@@ -197,6 +198,9 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
     )
   )
   raise "baseline could read sealed candidate workspace" if baseline_probe.fetch("target_readable")
+  unless baseline_probe.fetch("home") == identity.runtime_home(baseline).to_s
+    raise "baseline HOME was not isolated: #{baseline_probe.inspect}"
+  end
 
   identity.seal_tree(baseline)
   identity.prepare_tree(candidate)
@@ -208,6 +212,12 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
     )
   )
   raise "candidate could read sealed baseline workspace" if candidate_probe.fetch("target_readable")
+  unless candidate_probe.fetch("home") == identity.runtime_home(candidate).to_s
+    raise "candidate HOME was not isolated: #{candidate_probe.inspect}"
+  end
+  if baseline_probe.fetch("home") == candidate_probe.fetch("home")
+    raise "baseline and candidate unexpectedly shared HOME"
+  end
   identity.seal_tree(candidate)
 
   symlink_target = root.join("outside-owner-proof.txt")
@@ -220,6 +230,8 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
   changed_owner = [ symlink_target.stat.uid, symlink_target.stat.gid ]
   raise "workspace ownership followed a symlink outside the workspace" unless changed_owner == original_owner
   identity.seal_tree(symlink_workspace)
+  sealed_owner = [ symlink_target.stat.uid, symlink_target.stat.gid ]
+  raise "workspace sealing followed a symlink outside the workspace" unless sealed_owner == original_owner
 
   puts "subject_privilege_boundary=ok"
   puts "subject_uid=#{identity.uid}"
@@ -227,5 +239,6 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
   puts "capture_provider_authority_readable=false"
   puts "service_provider_authority_readable=false"
   puts "baseline_candidate_cross_readable=false"
+  puts "baseline_candidate_home_shared=false"
   puts "workspace_chown_followed_symlink=false"
 end
