@@ -15,7 +15,7 @@ module Plywo
       }.freeze
       SUPPORTED_MANAGERS = SUPPORTED_LOCKFILES.values.uniq.freeze
 
-      Detection = Data.define(:manager, :manifest, :lockfile, :package_manager_declaration) do
+      Detection = Data.define(:manager, :manifest, :lockfile, :package_manager_declaration, :yarn_generation) do
         def bootstrap_step
           SetupPlan::Step.new(
             phase: "bootstrap",
@@ -25,8 +25,9 @@ module Plywo
               manager:,
               manifest:,
               lockfile:,
-              frozen_lockfile: true
-            }
+              frozen_lockfile: true,
+              yarn_generation:
+            }.compact
           )
         end
 
@@ -35,7 +36,8 @@ module Plywo
             "package_json" => true,
             "javascript_package_manager" => manager,
             "javascript_lockfile" => lockfile,
-            "package_manager_declaration" => package_manager_declaration
+            "package_manager_declaration" => package_manager_declaration,
+            "yarn_generation" => yarn_generation
           }.compact
         end
       end
@@ -55,7 +57,8 @@ module Plywo
           manager:,
           manifest: "package.json",
           lockfile:,
-          package_manager_declaration: declaration
+          package_manager_declaration: declaration,
+          yarn_generation: manager == "yarn" ? detect_yarn_generation!(root.join(lockfile)) : nil
         )
       end
 
@@ -87,6 +90,16 @@ module Plywo
         end
 
         lockfiles.sole
+      end
+
+      def detect_yarn_generation!(lockfile)
+        contents = lockfile.read
+        return "classic" if contents.match?(/^# yarn lockfile v1\s*$/)
+        return "berry" if contents.match?(/^__metadata:\s*$/)
+
+        raise Error,
+          "Could not determine Yarn generation from yarn.lock; " \
+          "expected a Yarn Classic v1 header or Berry __metadata section"
       end
 
       def assert_declaration_matches!(declaration:, manager:, lockfile:)
