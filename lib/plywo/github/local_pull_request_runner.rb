@@ -67,6 +67,7 @@ module Plywo
         subject_discovery: nil,
         subject_bootstrap: nil,
         subject_lifecycle: nil,
+        setup_plan_compiler: nil,
         capture_runtime: nil
       )
         @root = Pathname(root).expand_path
@@ -74,10 +75,12 @@ module Plywo
         @command_runner = command_runner
         @fetch_repository = fetch_repository
         subject_discovery ||= Plywo::Subject::Discovery.new(command_runner:)
+        setup_plan_compiler ||= Plywo::Subject::SetupPlanCompiler.new
         @subject_lifecycle = subject_lifecycle || Plywo::Subject::Lifecycle.new(
           discovery: subject_discovery,
           bootstrap: subject_bootstrap,
-          environment: subject_environment
+          environment: subject_environment,
+          setup_plan_compiler:
         )
         @capture_runtime = capture_runtime || Plywo::Subject::RailsCaptureRuntime.new
       end
@@ -93,13 +96,15 @@ module Plywo
         prepare_worktree!(path: paths.fetch(:baseline_root), sha: execution.baseline_sha)
         prepare_worktree!(path: paths.fetch(:candidate_root), sha: execution.candidate_sha)
 
-        configuration = Plywo::Subject::Configuration.load(root: paths.fetch(:candidate_root))
+        capture_configuration = Plywo::Subject::Configuration.load(root: paths.fetch(:candidate_root))
+        baseline_setup_configuration = Plywo::Subject::Configuration.load(root: paths.fetch(:baseline_root))
 
         @subject_lifecycle.open(
           root: paths.fetch(:baseline_root),
           execution:,
           role: "base",
-          configuration:
+          configuration: capture_configuration,
+          setup_configuration: baseline_setup_configuration
         ) do |baseline_subject|
           capture_subject!(
             execution:,
@@ -115,7 +120,8 @@ module Plywo
           root: paths.fetch(:candidate_root),
           execution:,
           role: "candidate",
-          configuration:
+          configuration: capture_configuration,
+          setup_configuration: capture_configuration
         ) do |candidate_subject|
           capture_subject!(
             execution:,
