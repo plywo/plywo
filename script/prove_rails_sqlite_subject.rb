@@ -62,26 +62,29 @@ module RailsSqliteSubjectProof
           lockfile: TOOL_LOCKFILE,
           expected_digest: tool_lock_digest
         )
+        runtime_capabilities = Plywo::Subject::RuntimeCapabilities.ruby_only
         ruby_bundle_bootstrap = Plywo::Subject::RailsBundleBootstrap.new(
           command_runner:,
           cache_root: bootstrap_root
         )
         subject_bootstrap = Plywo::Subject::BootstrapExecutor.new(
-          ruby_bundle_bootstrap:
+          ruby_bundle_bootstrap:,
+          runtime_capabilities:
         )
         runner = Plywo::Github::LocalPullRequestRunner.new(
           root: subject_root,
           tool_root: TOOL_ROOT,
           command_runner:,
           fetch_repository: false,
-          subject_bootstrap:
+          subject_bootstrap:,
+          runtime_capabilities:
         )
         result = Plywo::Executor::LocalAdapter.new(runner:).call(request:)
 
         verify!(result)
         verify_clean_customer!(subject_root)
         verify_tool_lock_unchanged!(tool_lock_digest)
-        print_proof(request:, result:)
+        print_proof(request:, result:, runtime_capabilities:)
       end
     end
   end
@@ -260,7 +263,7 @@ module RailsSqliteSubjectProof
     raise "SQLite subject dependency setup mutated the Plywo control-plane lockfile"
   end
 
-  def print_proof(request:, result:)
+  def print_proof(request:, result:, runtime_capabilities:)
     payload = result.payload
     puts "Arbitrary Rails + SQLite customer bootstrap proof"
     puts "request_schema=#{request.schema_version}"
@@ -273,6 +276,7 @@ module RailsSqliteSubjectProof
     puts "candidate_config_applied_to_baseline=true"
     puts "subject_persistence_discovered=sqlite"
     puts "dependency_bootstrap=typed_setup_plan"
+    puts "executor_ruby_capability=#{runtime_capabilities.runtime_version("ruby")}"
     puts "capture_runtime=tool_owned_portable_rails"
     puts "customer_plywo_runtime_files=false"
     puts "customer_controller_knows_plywo=false"
