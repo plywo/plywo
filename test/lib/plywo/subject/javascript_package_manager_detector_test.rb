@@ -97,7 +97,7 @@ class PlywoSubjectJavascriptPackageManagerDetectorTest < ActiveSupport::TestCase
     end
   end
 
-  test "uses packageManager only as consistency evidence" do
+  test "parses exact packageManager version into evidence and bootstrap step" do
     with_subject do |root|
       write(root, "package.json", <<~JSON)
         {
@@ -110,6 +110,55 @@ class PlywoSubjectJavascriptPackageManagerDetectorTest < ActiveSupport::TestCase
 
       assert_equal "pnpm", detection.manager
       assert_equal "pnpm@10.15.0", detection.evidence.fetch("package_manager_declaration")
+      assert_equal "10.15.0", detection.evidence.fetch("package_manager_version")
+      assert_equal "10.15.0", detection.bootstrap_step.details.fetch("package_manager_version")
+      assert_nil detection.package_manager_integrity
+    end
+  end
+
+  test "parses Corepack integrity without changing the requested package-manager version" do
+    with_subject do |root|
+      write(root, "package.json", <<~JSON)
+        {
+          "packageManager": "pnpm@10.15.0+sha512.aBcD0123"
+        }
+      JSON
+      write(root, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+
+      detection = detector.call(root:)
+
+      assert_equal "10.15.0", detection.package_manager_version
+      assert_equal "sha512.aBcD0123", detection.package_manager_integrity
+      assert_equal "sha512.aBcD0123", detection.evidence.fetch("package_manager_integrity")
+      assert_equal "10.15.0", detection.bootstrap_step.details.fetch("package_manager_version")
+    end
+  end
+
+  test "fails closed when packageManager does not pin an exact version" do
+    [ "pnpm@latest", "pnpm@^10.15.0", "pnpm@10" ].each do |declaration|
+      with_subject do |root|
+        write(root, "package.json", JSON.generate("packageManager" => declaration))
+        write(root, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+
+        error = assert_raises(Plywo::Subject::JavascriptPackageManagerDetector::Error) do
+          detector.call(root:)
+        end
+
+        assert_match(/must pin an exact version/, error.message)
+      end
+    end
+  end
+
+  test "fails closed when packageManager integrity is invalid" do
+    with_subject do |root|
+      write(root, "package.json", JSON.generate("packageManager" => "pnpm@10.15.0+sha512.not-hex"))
+      write(root, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+
+      error = assert_raises(Plywo::Subject::JavascriptPackageManagerDetector::Error) do
+        detector.call(root:)
+      end
+
+      assert_match(/Invalid package.json packageManager integrity/, error.message)
     end
   end
 
