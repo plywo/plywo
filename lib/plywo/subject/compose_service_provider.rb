@@ -34,7 +34,6 @@ module Plywo
         user
         working_dir
       ].freeze
-      SERVICE_NAME_PATTERN = /\A[a-zA-Z0-9][a-zA-Z0-9_.-]*\z/
 
       CommandResult = Data.define(:stdout, :stderr, :success)
       Handle = Data.define(:project_name, :manifest_path, :container_id, :compose_service)
@@ -127,7 +126,8 @@ module Plywo
           root: handle.manifest_path.dirname,
           argv: [ "docker", "logs", "--tail", "50", handle.container_id ]
         )
-        [ result.stdout, result.stderr ].reject(&:empty?).join("\n").byteslice(-4_000, 4_000).to_s
+        content = [ result.stdout, result.stderr ].reject(&:empty?).join("\n")
+        content.bytesize > 4_000 ? content.byteslice(-4_000, 4_000) : content
       rescue StandardError
         ""
       end
@@ -193,26 +193,32 @@ module Plywo
           raise Error, "Compose manifest services must be a mapping"
         end
 
-        service = services.fetch(compose_service) do
+        services.each do |name, service|
+          validate_manifest_service!(name.to_s, service)
+        end
+        unless services.key?(compose_service)
           raise Error, "Compose manifest does not declare service #{compose_service.inspect}"
         end
+      rescue Psych::Exception => error
+        raise Error, "Invalid Compose manifest: #{error.message}"
+      end
+
+      def validate_manifest_service!(name, service)
         unless service.is_a?(Hash)
-          raise Error, "Compose service #{compose_service.inspect} must be a mapping"
+          raise Error, "Compose service #{name.inspect} must be a mapping"
         end
 
         unknown_service_keys = service.keys.map(&:to_s) - ALLOWED_SERVICE_KEYS
         unless unknown_service_keys.empty?
           raise Error,
-            "Compose service #{compose_service.inspect} uses unsupported keys: " \
+            "Compose service #{name.inspect} uses unsupported keys: " \
             "#{unknown_service_keys.sort.join(", ")}"
         end
 
         image = service["image"]
         unless image.is_a?(String) && !image.strip.empty?
-          raise Error, "Compose service #{compose_service.inspect} must declare an image"
+          raise Error, "Compose service #{name.inspect} must declare an image"
         end
-      rescue Psych::Exception => error
-        raise Error, "Invalid Compose manifest: #{error.message}"
       end
 
       def validate_compose_config!(root:, manifest_path:, compose_service:)
