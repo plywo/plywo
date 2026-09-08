@@ -124,7 +124,7 @@ module YarnBerryExecutorCapabilityProof
   def generate_lockfile!(command_runner, root)
     command_runner.call(
       env: {},
-      command: %w[yarn install --mode=skip-builds],
+      command: %w[yarn install --mode=skip-build],
       chdir: root.to_s
     )
 
