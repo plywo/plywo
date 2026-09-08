@@ -12,7 +12,7 @@ module Plywo
 
       def open(root:, execution:, role:, configuration:, setup_configuration: configuration)
         setup_plan = compile_setup_plan(root:, configuration: setup_configuration)
-        runtime_env = bootstrap(root:)
+        runtime_env = bootstrap(root:, setup_plan:)
         environment = resolve_environment(root:, configuration: setup_configuration, runtime_env:)
         capture_env = nil
         services_started = false
@@ -45,10 +45,10 @@ module Plywo
         @setup_plan_compiler.call(root:, configuration:)
       end
 
-      def bootstrap(root:)
+      def bootstrap(root:, setup_plan:)
         return {} unless @bootstrap
 
-        @bootstrap.call(root:)
+        @bootstrap.call(root:, setup_plan:)
       end
 
       def resolve_environment(root:, configuration:, runtime_env:)
