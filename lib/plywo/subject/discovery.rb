@@ -1,4 +1,5 @@
 require "pathname"
+require_relative "execution_identity"
 
 module Plywo
   module Subject
