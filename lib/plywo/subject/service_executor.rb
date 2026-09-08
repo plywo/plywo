@@ -47,9 +47,14 @@ module Plywo
       Session = Data.define(:services, :state_dir)
       StartResult = Data.define(:session, :env)
 
-      def initialize(host_env: ENV, compose_provider: nil)
+      def initialize(
+        host_env: ENV,
+        compose_provider: nil,
+        execution_identity: ExecutionIdentity.new
+      )
         @host_env = host_env
         @compose_provider = compose_provider
+        @execution_identity = execution_identity
       end
 
       def start(root:, execution:, role:, env:, setup_plan:)
@@ -137,6 +142,8 @@ module Plywo
         details = step.details
         name = details.fetch("name")
         runtime = details.fetch("runtime")
+        @execution_identity.prepare_tree(root)
+        @execution_identity.prepare_directory(state_dir)
         entrypoint = resolve_entrypoint(root:, value: details.fetch("entrypoint"), service_name: name)
         args = details.fetch("args")
         port_env = details.fetch("port_env")
@@ -151,10 +158,13 @@ module Plywo
         port = allocate_port
         host = "127.0.0.1"
         url = "http://#{host}:#{port}"
-        service_env = safe_inherited_environment.merge(env).merge(
-          port_env => port.to_s,
-          url_env => url
-        )
+        service_env = safe_inherited_environment
+          .merge(env)
+          .merge(@execution_identity.environment)
+          .merge(
+            port_env => port.to_s,
+            url_env => url
+          )
         stdout_path = state_dir.join("#{name}.stdout.log")
         stderr_path = state_dir.join("#{name}.stderr.log")
 
@@ -169,7 +179,8 @@ module Plywo
             chdir: root.to_s,
             out: stdout_path.to_s,
             err: stderr_path.to_s,
-            unsetenv_others: true
+            unsetenv_others: true,
+            **@execution_identity.spawn_options
           )
         when "node"
           Process.spawn(
@@ -181,7 +192,8 @@ module Plywo
             chdir: root.to_s,
             out: stdout_path.to_s,
             err: stderr_path.to_s,
-            unsetenv_others: true
+            unsetenv_others: true,
+            **@execution_identity.spawn_options
           )
         end
 
