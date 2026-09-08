@@ -22,16 +22,23 @@ module Plywo
         SSL_CERT_FILE
         SSL_CERT_DIR
       ].freeze
-      SUPPORTED_START_OPERATION = "process.start".freeze
-      SUPPORTED_HEALTHCHECK_OPERATION = "http.wait_ready".freeze
-      SUPPORTED_STOP_OPERATION = "process.stop".freeze
+      PROCESS_START_OPERATION = "process.start".freeze
+      COMPOSE_START_OPERATION = "compose.run".freeze
+      HTTP_HEALTHCHECK_OPERATION = "http.wait_ready".freeze
+      TCP_HEALTHCHECK_OPERATION = "tcp.wait_ready".freeze
+      PROCESS_STOP_OPERATION = "process.stop".freeze
+      COMPOSE_STOP_OPERATION = "compose.stop".freeze
       SUPPORTED_RUNTIMES = %w[ruby node].freeze
       STOP_TIMEOUT_SECONDS = 2
       READINESS_INTERVAL_SECONDS = 0.05
 
       RunningService = Data.define(
         :name,
+        :kind,
         :pid,
+        :handle,
+        :host,
+        :port,
         :url_env,
         :url,
         :stdout_path,
@@ -40,8 +47,9 @@ module Plywo
       Session = Data.define(:services, :state_dir)
       StartResult = Data.define(:session, :env)
 
-      def initialize(host_env: ENV)
+      def initialize(host_env: ENV, compose_provider: nil)
         @host_env = host_env
+        @compose_provider = compose_provider
       end
 
       def start(root:, execution:, role:, env:, setup_plan:)
@@ -53,16 +61,25 @@ module Plywo
         capture_env = {}
 
         steps.each do |step|
-          unless step.operation == SUPPORTED_START_OPERATION
+          service = case step.operation
+          when PROCESS_START_OPERATION
+            start_process(
+              root: Pathname(root),
+              env: env.merge(capture_env),
+              step:,
+              state_dir:
+            )
+          when COMPOSE_START_OPERATION
+            start_compose(
+              root: Pathname(root),
+              role:,
+              env: env.merge(capture_env),
+              step:
+            )
+          else
             raise Error, "Unsupported service start operation #{step.operation.inspect}"
           end
 
-          service = start_process(
-            root: Pathname(root),
-            env: env.merge(capture_env),
-            step:,
-            state_dir:
-          )
           running << service
           capture_env[service.url_env] = service.url
         end
@@ -83,15 +100,19 @@ module Plywo
           result[service.name] = service
         end
         setup_plan.steps_for("healthcheck").each do |step|
-          unless step.operation == SUPPORTED_HEALTHCHECK_OPERATION
-            raise Error, "Unsupported service healthcheck operation #{step.operation.inspect}"
-          end
-
           service_name = step.details.fetch("name")
           service = services.fetch(service_name) do
             raise Error, "Readiness references service that was not started: #{service_name}"
           end
-          wait_until_ready(service:, step:, env:)
+
+          case step.operation
+          when HTTP_HEALTHCHECK_OPERATION
+            wait_until_http_ready(service:, step:, env:)
+          when TCP_HEALTHCHECK_OPERATION
+            wait_until_tcp_ready(service:, step:)
+          else
+            raise Error, "Unsupported service healthcheck operation #{step.operation.inspect}"
+          end
         end
       end
 
@@ -128,7 +149,8 @@ module Plywo
         end
 
         port = allocate_port
-        url = "http://127.0.0.1:#{port}"
+        host = "127.0.0.1"
+        url = "http://#{host}:#{port}"
         service_env = safe_inherited_environment.merge(env).merge(
           port_env => port.to_s,
           url_env => url
@@ -165,7 +187,11 @@ module Plywo
 
         RunningService.new(
           name:,
+          kind: "process",
           pid:,
+          handle: nil,
+          host:,
+          port:,
           url_env:,
           url:,
           stdout_path:,
@@ -173,6 +199,36 @@ module Plywo
         )
       rescue SystemCallError => error
         raise Error, "Could not start service #{name.inspect}: #{error.message}"
+      end
+
+      def start_compose(root:, role:, env:, step:)
+        details = step.details
+        name = details.fetch("name")
+        url_env = details.fetch("url_env")
+        if env.key?(url_env)
+          raise Error, "Service #{name.inspect} cannot overwrite capture environment #{url_env.inspect}"
+        end
+        unless @compose_provider
+          raise Error, "Compose service provider is unavailable for #{name.inspect}"
+        end
+
+        started = @compose_provider.start(root:, role:, step:)
+        url = "#{details.fetch("url_scheme")}://#{started.host}:#{started.port}"
+
+        RunningService.new(
+          name:,
+          kind: "compose",
+          pid: nil,
+          handle: started.handle,
+          host: started.host,
+          port: started.port,
+          url_env:,
+          url:,
+          stdout_path: nil,
+          stderr_path: nil
+        )
+      rescue ComposeServiceProvider::Error => error
+        raise Error, error.message
       end
 
       def resolve_entrypoint(root:, value:, service_name:)
@@ -190,7 +246,7 @@ module Plywo
         raise Error, "Service #{service_name.inspect} entrypoint is unavailable: #{error.message}"
       end
 
-      def wait_until_ready(service:, step:, env:)
+      def wait_until_http_ready(service:, step:, env:)
         details = step.details
         path = details.fetch("path")
         timeout_seconds = details.fetch("timeout_seconds")
@@ -219,31 +275,84 @@ module Plywo
           sleep READINESS_INTERVAL_SECONDS
         end
 
+        raise_readiness_error(service:, target: uri.to_s, last_error:)
+      end
+
+      def wait_until_tcp_ready(service:, step:)
+        timeout_seconds = step.details.fetch("timeout_seconds")
+        deadline = monotonic_now + timeout_seconds
+        last_error = nil
+
+        loop do
+          begin
+            socket = TCPSocket.new(service.host, service.port)
+            socket.close
+            return
+          rescue SystemCallError, IOError, SocketError => error
+            last_error = "#{error.class}: #{error.message}"
+          end
+
+          break if monotonic_now >= deadline
+
+          sleep READINESS_INTERVAL_SECONDS
+        end
+
+        raise_readiness_error(
+          service:,
+          target: "tcp://#{service.host}:#{service.port}",
+          last_error:
+        )
+      end
+
+      def raise_readiness_error(service:, target:, last_error:)
         raise Error,
-          "Service #{service.name.inspect} failed readiness at #{uri}: #{last_error}; " \
-          "stderr=#{tail(service.stderr_path).inspect}"
+          "Service #{service.name.inspect} failed readiness at #{target}: #{last_error}; " \
+          "diagnostics=#{service_diagnostics(service).inspect}"
       end
 
       def validate_stop_steps!(setup_plan:, session:)
         steps = setup_plan.steps_for("stop_services")
-        steps.each do |step|
-          unless step.operation == SUPPORTED_STOP_OPERATION
-            raise Error, "Unsupported service stop operation #{step.operation.inspect}"
-          end
+        planned = steps.to_h do |step|
+          [ step.details.fetch("name"), step.operation ]
         end
-
-        planned_names = steps.map { |step| step.details.fetch("name") }.sort
-        running_names = session.services.map(&:name).sort
-        return if planned_names == running_names
+        running = session.services.to_h do |service|
+          operation = service.kind == "compose" ? COMPOSE_STOP_OPERATION : PROCESS_STOP_OPERATION
+          [ service.name, operation ]
+        end
+        return if planned == running
 
         raise Error,
           "Service stop plan does not match running services: " \
-          "planned=#{planned_names.inspect} running=#{running_names.inspect}"
+          "planned=#{planned.inspect} running=#{running.inspect}"
       end
 
       def stop_session(session)
-        session.services.reverse_each { |service| stop_process(service) }
+        first_error = nil
+        session.services.reverse_each do |service|
+          begin
+            stop_service(service)
+          rescue StandardError => error
+            first_error ||= error
+          end
+        end
         FileUtils.rm_rf(session.state_dir)
+        raise first_error if first_error
+      end
+
+      def stop_service(service)
+        case service.kind
+        when "process"
+          stop_process(service)
+        when "compose"
+          unless @compose_provider
+            raise Error, "Compose service provider is unavailable while stopping #{service.name.inspect}"
+          end
+          @compose_provider.stop(service.handle)
+        else
+          raise Error, "Unsupported running service kind #{service.kind.inspect}"
+        end
+      rescue ComposeServiceProvider::Error => error
+        raise Error, error.message
       end
 
       def stop_process(service)
@@ -264,6 +373,19 @@ module Plywo
         end
       end
 
+      def service_diagnostics(service)
+        case service.kind
+        when "process"
+          tail(service.stderr_path)
+        when "compose"
+          @compose_provider&.diagnostics(service.handle).to_s
+        else
+          ""
+        end
+      rescue StandardError
+        ""
+      end
+
       def allocate_port
         server = TCPServer.new("127.0.0.1", 0)
         server.addr[1]
@@ -279,7 +401,7 @@ module Plywo
       end
 
       def tail(path, bytes: 2_000)
-        return "" unless path.file?
+        return "" unless path&.file?
 
         content = path.read
         content.bytesize > bytes ? content.byteslice(-bytes, bytes) : content

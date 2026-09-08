@@ -1,7 +1,7 @@
 require "test_helper"
 
 class PlywoSubjectRuntimeCapabilitiesTest < ActiveSupport::TestCase
-  test "stores declared runtime and package-manager versions" do
+  test "stores declared runtime, package-manager, and service-provider versions" do
     capabilities = Plywo::Subject::RuntimeCapabilities.new(
       runtimes: {
         ruby: "3.4.10",
@@ -9,15 +9,20 @@ class PlywoSubjectRuntimeCapabilitiesTest < ActiveSupport::TestCase
       },
       package_managers: {
         pnpm: "10.0.0"
+      },
+      service_providers: {
+        compose: "2.40.0"
       }
     )
 
     assert capabilities.runtime?("ruby")
     assert capabilities.runtime?(:node)
     assert capabilities.package_manager?("pnpm")
+    assert capabilities.service_provider?(:compose)
     assert_equal "3.4.10", capabilities.runtime_version("ruby")
     assert_equal "24.0.0", capabilities.runtime_version(:node)
     assert_equal "10.0.0", capabilities.package_manager_version(:pnpm)
+    assert_equal "2.40.0", capabilities.service_provider_version("compose")
     assert_equal(
       {
         "runtimes" => {
@@ -26,13 +31,16 @@ class PlywoSubjectRuntimeCapabilitiesTest < ActiveSupport::TestCase
         },
         "package_managers" => {
           "pnpm" => "10.0.0"
+        },
+        "service_providers" => {
+          "compose" => "2.40.0"
         }
       },
       capabilities.to_h
     )
   end
 
-  test "ruby_only declares the current Ruby and no JavaScript tooling" do
+  test "ruby_only declares the current Ruby and no JavaScript tooling or service providers" do
     capabilities = Plywo::Subject::RuntimeCapabilities.ruby_only(version: "3.4.10")
 
     assert_equal "3.4.10", capabilities.runtime_version("ruby")
@@ -42,6 +50,7 @@ class PlywoSubjectRuntimeCapabilitiesTest < ActiveSupport::TestCase
     refute capabilities.package_manager?("pnpm")
     refute capabilities.package_manager?("yarn")
     refute capabilities.package_manager?("bun")
+    refute capabilities.service_provider?("compose")
   end
 
   test "loads executor capabilities from an explicit JSON environment declaration" do
@@ -53,6 +62,9 @@ class PlywoSubjectRuntimeCapabilitiesTest < ActiveSupport::TestCase
         },
         "package_managers" => {
           "npm" => "11.19.0"
+        },
+        "service_providers" => {
+          "compose" => "2.40.0"
         }
       )
     }
@@ -62,6 +74,7 @@ class PlywoSubjectRuntimeCapabilitiesTest < ActiveSupport::TestCase
     assert_equal "3.4.10", capabilities.runtime_version("ruby")
     assert_equal "24.20.0", capabilities.runtime_version("node")
     assert_equal "11.19.0", capabilities.package_manager_version("npm")
+    assert_equal "2.40.0", capabilities.service_provider_version("compose")
   end
 
   test "falls back to Ruby-only capabilities when the executor declaration is absent" do
@@ -70,6 +83,7 @@ class PlywoSubjectRuntimeCapabilitiesTest < ActiveSupport::TestCase
     assert_equal "3.4.10", capabilities.runtime_version("ruby")
     refute capabilities.runtime?("node")
     refute capabilities.package_manager?("npm")
+    refute capabilities.service_provider?("compose")
   end
 
   test "rejects invalid executor capability JSON instead of probing the host" do
