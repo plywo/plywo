@@ -12,7 +12,7 @@ class PlywoSubjectJavascriptPackageManagerDetectorTest < ActiveSupport::TestCase
     }.each do |lockfile, manager|
       with_subject do |root|
         write(root, "package.json", "{}\n")
-        write(root, lockfile, "lock\n")
+        write(root, lockfile, lockfile == "yarn.lock" ? "# yarn lockfile v1\n" : "lock\n")
 
         detection = detector.call(root:)
 
@@ -22,7 +22,41 @@ class PlywoSubjectJavascriptPackageManagerDetectorTest < ActiveSupport::TestCase
         assert_equal "javascript.dependencies", detection.bootstrap_step.operation
         assert_equal true, detection.bootstrap_step.details.fetch("frozen_lockfile")
         assert_equal manager, detection.evidence.fetch("javascript_package_manager")
+        if manager == "yarn"
+          assert_equal "classic", detection.bootstrap_step.details.fetch("yarn_generation")
+        end
       end
+    end
+  end
+
+  test "detects Yarn Berry from lockfile metadata" do
+    with_subject do |root|
+      write(root, "package.json", "{}\n")
+      write(root, "yarn.lock", <<~LOCK)
+        __metadata:
+          version: 8
+          cacheKey: 10c0
+      LOCK
+
+      detection = detector.call(root:)
+
+      assert_equal "yarn", detection.manager
+      assert_equal "berry", detection.yarn_generation
+      assert_equal "berry", detection.bootstrap_step.details.fetch("yarn_generation")
+      assert_equal "berry", detection.evidence.fetch("yarn_generation")
+    end
+  end
+
+  test "fails closed when Yarn generation cannot be determined" do
+    with_subject do |root|
+      write(root, "package.json", "{}\n")
+      write(root, "yarn.lock", "unrecognized\n")
+
+      error = assert_raises(Plywo::Subject::JavascriptPackageManagerDetector::Error) do
+        detector.call(root:)
+      end
+
+      assert_match(/Could not determine Yarn generation/, error.message)
     end
   end
 
@@ -50,7 +84,7 @@ class PlywoSubjectJavascriptPackageManagerDetectorTest < ActiveSupport::TestCase
     with_subject do |root|
       write(root, "package.json", "{}\n")
       write(root, "package-lock.json", "{}\n")
-      write(root, "yarn.lock", "lock\n")
+      write(root, "yarn.lock", "# yarn lockfile v1\n")
 
       error = assert_raises(Plywo::Subject::JavascriptPackageManagerDetector::Error) do
         detector.call(root:)
