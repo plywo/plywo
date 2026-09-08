@@ -21,8 +21,9 @@ module Plywo
           SSL_CERT_DIR
         ].freeze
 
-        def initialize(host_env: ENV)
+        def initialize(host_env: ENV, execution_identity: Plywo::Subject::ExecutionIdentity.new)
           @host_env = host_env
+          @execution_identity = execution_identity
         end
 
         def call(env:, command:, chdir:)
@@ -30,12 +31,15 @@ module Plywo
           child_env = nil
 
           Bundler.with_unbundled_env do
-            child_env = safe_inherited_environment.merge(env.transform_keys(&:to_s))
+            child_env = safe_inherited_environment
+              .merge(@execution_identity.environment)
+              .merge(env.transform_keys(&:to_s))
             stdout, stderr, status = Open3.capture3(
               child_env,
               *command,
               chdir:,
-              unsetenv_others: true
+              unsetenv_others: true,
+              **@execution_identity.spawn_options
             )
           end
 
@@ -69,21 +73,28 @@ module Plywo
         subject_lifecycle: nil,
         setup_plan_compiler: nil,
         capture_runtime: nil,
-        runtime_capabilities: nil
+        runtime_capabilities: nil,
+        execution_identity: nil,
+        subject_command_runner: nil,
+        service_executor: nil
       )
         @root = Pathname(root).expand_path
         @tool_root = Pathname(tool_root).expand_path
         @command_runner = command_runner
         @fetch_repository = fetch_repository
+        @execution_identity = execution_identity || Plywo::Subject::ExecutionIdentity.from_env
+        @subject_command_runner = subject_command_runner || default_subject_command_runner(command_runner)
         runtime_capabilities ||= Plywo::Subject::RuntimeCapabilities.from_env
         subject_discovery ||= Plywo::Subject::Discovery.new(command_runner:)
         setup_plan_compiler ||= Plywo::Subject::SetupPlanCompiler.new(runtime_capabilities:)
         subject_bootstrap ||= default_subject_bootstrap(runtime_capabilities:)
+        service_executor ||= Plywo::Subject::ServiceExecutor.new(execution_identity: @execution_identity)
         @subject_lifecycle = subject_lifecycle || Plywo::Subject::Lifecycle.new(
           discovery: subject_discovery,
           bootstrap: subject_bootstrap,
           environment: subject_environment,
-          setup_plan_compiler:
+          setup_plan_compiler:,
+          service_executor:
         )
         @capture_runtime = capture_runtime || Plywo::Subject::RailsCaptureRuntime.new
       end
@@ -148,6 +159,12 @@ module Plywo
 
       private
 
+      def default_subject_command_runner(command_runner)
+        return command_runner unless @execution_identity.enabled?
+
+        CommandRunner.new(execution_identity: @execution_identity)
+      end
+
       def default_subject_bootstrap(runtime_capabilities:)
         Plywo::Subject::BootstrapExecutor.new(
           ruby_bundle_bootstrap: Plywo::Subject::RailsBundleBootstrap.new(
@@ -180,6 +197,7 @@ module Plywo
       def execution_paths(execution:)
         directory = @root.join("tmp", "plywo", "github", execution.execution_id.delete_prefix("github-")[0, 16])
         FileUtils.mkdir_p(directory)
+        @execution_identity.prepare_directory(directory)
 
         {
           baseline_root: directory.join("base"),
@@ -193,9 +211,11 @@ module Plywo
         cleanup_worktree(path)
         FileUtils.rm_rf(path)
         run!(command: [ "git", "worktree", "add", "--detach", path.to_s, sha ], chdir: @root)
+        @execution_identity.prepare_tree(path)
       end
 
       def capture_subject!(execution:, root:, label:, sha:, environment:, output:)
+        @execution_identity.prepare_tree(root)
         capture_script = @capture_runtime.script_for(root:, tool_root: @tool_root)
         env = environment.merge(
           "PLYWO_RUN_ID" => execution.execution_id,
@@ -207,10 +227,10 @@ module Plywo
           "PLYWO_CAPTURE_RUNTIME" => @capture_runtime.mode_for(root:)
         )
 
-        run!(
+        @subject_command_runner.call(
           env:,
           command: [ RbConfig.ruby, capture_script.to_s ],
-          chdir: root
+          chdir: root.to_s
         )
       end
 
