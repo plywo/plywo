@@ -89,7 +89,7 @@ module Plywo
             "#{lockfiles.sort.join(", ")}"
         end
 
-        lockfiles.sole
+        lockfiles.fetch(0)
       end
 
       def detect_yarn_generation!(lockfile)
