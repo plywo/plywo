@@ -4,11 +4,11 @@ require "tmpdir"
 require "uri"
 
 class PlywoSubjectServiceExecutorTest < ActiveSupport::TestCase
-  test "starts process on a dynamic port, waits for HTTP readiness, and tears it down" do
+  test "starts Ruby entrypoint on a dynamic port, waits for HTTP readiness, and tears it down" do
     Dir.mktmpdir("plywo-service-executor-") do |directory|
       root = Pathname(directory)
-      write_service(root, status: 200)
-      plan = setup_plan
+      write_service(root)
+      plan = setup_plan(status: 200)
       executor = Plywo::Subject::ServiceExecutor.new
       result = executor.start(
         root:,
@@ -56,8 +56,8 @@ class PlywoSubjectServiceExecutorTest < ActiveSupport::TestCase
   test "reports readiness failure with service context" do
     Dir.mktmpdir("plywo-service-executor-") do |directory|
       root = Pathname(directory)
-      write_service(root, status: 503)
-      plan = setup_plan(timeout_seconds: 1)
+      write_service(root)
+      plan = setup_plan(status: 503, timeout_seconds: 1)
       executor = Plywo::Subject::ServiceExecutor.new
       result = executor.start(
         root:,
@@ -92,9 +92,51 @@ class PlywoSubjectServiceExecutorTest < ActiveSupport::TestCase
     end
   end
 
+  test "rejects entrypoints that resolve outside the repository" do
+    Dir.mktmpdir("plywo-service-root-") do |directory|
+      Dir.mktmpdir("plywo-service-outside-") do |outside|
+        root = Pathname(directory)
+        outside_script = Pathname(outside).join("outside.rb")
+        outside_script.write("exit 0\n")
+        root.join("service.rb").make_symlink(outside_script)
+
+        error = assert_raises(Plywo::Subject::ServiceExecutor::Error) do
+          Plywo::Subject::ServiceExecutor.new.start(
+            root:,
+            execution: Object.new,
+            role: "candidate",
+            env: {},
+            setup_plan: setup_plan(status: 200)
+          )
+        end
+
+        assert_includes error.message, "entrypoint must resolve to a file inside the repository"
+      end
+    end
+  end
+
+  test "does not let service URL overwrite capture environment" do
+    Dir.mktmpdir("plywo-service-executor-") do |directory|
+      root = Pathname(directory)
+      write_service(root)
+
+      error = assert_raises(Plywo::Subject::ServiceExecutor::Error) do
+        Plywo::Subject::ServiceExecutor.new.start(
+          root:,
+          execution: Object.new,
+          role: "candidate",
+          env: { "MOCK_API_URL" => "https://existing.example" },
+          setup_plan: setup_plan(status: 200)
+        )
+      end
+
+      assert_includes error.message, "cannot overwrite capture environment"
+    end
+  end
+
   private
 
-  def setup_plan(timeout_seconds: 2)
+  def setup_plan(status:, timeout_seconds: 2)
     Plywo::Subject::SetupPlan.new(
       framework: "test",
       steps: [
@@ -104,7 +146,9 @@ class PlywoSubjectServiceExecutorTest < ActiveSupport::TestCase
           provenance: "explicit",
           details: {
             name: "mock-api",
-            command: [ "ruby", "service.rb" ],
+            runtime: "ruby",
+            entrypoint: "service.rb",
+            args: [ status.to_s ],
             port_env: "MOCK_API_PORT",
             url_env: "MOCK_API_URL"
           }
@@ -130,11 +174,11 @@ class PlywoSubjectServiceExecutorTest < ActiveSupport::TestCase
     )
   end
 
-  def write_service(root, status:)
+  def write_service(root)
     root.join("service.rb").write(<<~RUBY)
       require "socket"
 
-      status = #{status}
+      status = Integer(ARGV.fetch(0), 10)
       server = TCPServer.new("127.0.0.1", Integer(ENV.fetch("MOCK_API_PORT"), 10))
       trap("TERM") do
         server.close rescue nil
