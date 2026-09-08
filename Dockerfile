@@ -5,6 +5,8 @@ ARG NODE_VERSION=24.20.0
 ARG NPM_VERSION=11.19.0
 ARG PNPM_VERSION=12.3.4
 ARG YARN_VERSION=4.18.0
+ARG SUBJECT_UID=10001
+ARG SUBJECT_GID=10001
 
 FROM node:${NODE_VERSION}-slim AS node_runtime
 ARG PNPM_VERSION
@@ -22,13 +24,19 @@ ARG NODE_VERSION
 ARG NPM_VERSION
 ARG PNPM_VERSION
 ARG YARN_VERSION
+ARG SUBJECT_UID
+ARG SUBJECT_GID
 
 WORKDIR /app
 
 ENV BUNDLE_DEPLOYMENT=1 \
     BUNDLE_PATH=/usr/local/bundle \
     BUNDLE_WITHOUT=development \
-    PLYWO_EXECUTOR_CAPABILITIES_JSON="{\"runtimes\":{\"ruby\":\"${RUBY_VERSION}\",\"node\":\"${NODE_VERSION}\"},\"package_managers\":{\"npm\":\"${NPM_VERSION}\",\"pnpm\":\"${PNPM_VERSION}\",\"yarn\":\"${YARN_VERSION}\"}}"
+    PLYWO_EXECUTOR_CAPABILITIES_JSON="{\"runtimes\":{\"ruby\":\"${RUBY_VERSION}\",\"node\":\"${NODE_VERSION}\"},\"package_managers\":{\"npm\":\"${NPM_VERSION}\",\"pnpm\":\"${PNPM_VERSION}\",\"yarn\":\"${YARN_VERSION}\"}}" \
+    PLYWO_SUBJECT_UID="${SUBJECT_UID}" \
+    PLYWO_SUBJECT_GID="${SUBJECT_GID}" \
+    PLYWO_SUBJECT_HOME="/home/plywo-subject" \
+    PLYWO_SUBJECT_USER="plywo-subject"
 
 RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y \
@@ -37,6 +45,8 @@ RUN apt-get update -qq && \
       libpq-dev \
       libsqlite3-dev \
       pkg-config && \
+    groupadd --gid "${SUBJECT_GID}" plywo-subject && \
+    useradd --uid "${SUBJECT_UID}" --gid "${SUBJECT_GID}" --home-dir /home/plywo-subject --create-home --shell /usr/sbin/nologin plywo-subject && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
@@ -66,7 +76,8 @@ RUN bundle exec ruby script/prove_node_npm_executor_capability.rb && \
     bundle exec ruby script/prove_yarn_berry_executor_capability.rb && \
     bundle exec ruby script/prove_http_service_lifecycle.rb && \
     bundle exec ruby script/prove_node_service_runtime.rb && \
-    bundle exec ruby script/prove_production_compose_disabled.rb
+    bundle exec ruby script/prove_production_compose_disabled.rb && \
+    bundle exec ruby script/prove_subject_privilege_boundary.rb
 
 ENV RAILS_ENV=production \
     RAILS_LOG_TO_STDOUT=1

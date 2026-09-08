@@ -2,6 +2,7 @@ require "digest"
 require "fileutils"
 require "pathname"
 require "rbconfig"
+require_relative "execution_identity"
 
 module Plywo
   module Subject
@@ -11,11 +12,15 @@ module Plywo
       def initialize(
         command_runner:,
         cache_root: ::Rails.root.join("tmp", "plywo", "bundles"),
-        ruby_version: RUBY_VERSION
+        ruby_version: RUBY_VERSION,
+        bundler_installer_command_runner: command_runner,
+        execution_identity: ExecutionIdentity.new
       )
         @command_runner = command_runner
-        @cache_root = Pathname(cache_root).expand_path
+        @bundler_installer_command_runner = bundler_installer_command_runner
+        @cache_root = cache_root && Pathname(cache_root).expand_path
         @ruby_version = ruby_version.to_s
+        @execution_identity = execution_identity
       end
 
       def call(root:)
@@ -28,8 +33,9 @@ module Plywo
 
         assert_ruby_compatible!(root:, lockfile:)
         lock_digest = Digest::SHA256.file(lockfile).hexdigest
-        bundle_root = @cache_root.join(cache_key(lock_digest))
+        bundle_root = bundle_cache_root(root).join(cache_key(lock_digest))
         FileUtils.mkdir_p(bundle_root)
+        @execution_identity.prepare_tree(bundle_root)
 
         env = {
           "BUNDLE_GEMFILE" => gemfile.to_s,
@@ -71,13 +77,17 @@ module Plywo
         @command_runner.call(env:, command:, chdir: chdir.to_s)
       end
 
+      def run_installer!(env:, command:, chdir:)
+        @bundler_installer_command_runner.call(env:, command:, chdir: chdir.to_s)
+      end
+
       def ensure_bundler!(version:, chdir:)
         return unless version
 
         begin
-          run!(env: {}, command: [ "gem", "list", "-i", "bundler", "-v", version ], chdir:)
+          run_installer!(env: {}, command: [ "gem", "list", "-i", "bundler", "-v", version ], chdir:)
         rescue Plywo::Github::LocalPullRequestRunner::Error
-          run!(
+          run_installer!(
             env: {},
             command: [ "gem", "install", "bundler", "-v", version, "--no-document" ],
             chdir:
@@ -131,6 +141,10 @@ module Plywo
       def cache_key(lock_digest)
         ruby_line = major_minor(@ruby_version).join(".")
         "ruby-#{ruby_line}-#{lock_digest[0, 20]}"
+      end
+
+      def bundle_cache_root(root)
+        @cache_root || root.join("tmp", "plywo", "bundles")
       end
     end
   end

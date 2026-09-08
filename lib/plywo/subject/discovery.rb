@@ -1,4 +1,5 @@
 require "pathname"
+require_relative "execution_identity"
 
 module Plywo
   module Subject
@@ -11,10 +12,16 @@ module Plywo
         "sqlite3" => "sqlite"
       }.freeze
 
-      def initialize(command_runner:, postgres_options: {}, sqlite_options: {})
+      def initialize(
+        command_runner:,
+        postgres_options: {},
+        sqlite_options: {},
+        execution_identity: ExecutionIdentity.new
+      )
         @command_runner = command_runner
         @postgres_options = postgres_options
         @sqlite_options = sqlite_options
+        @execution_identity = execution_identity
       end
 
       def resolve(root:, configuration:, runtime_env: {})
@@ -35,7 +42,8 @@ module Plywo
           RailsSqliteEnvironment.new(
             command_runner: @command_runner,
             **@sqlite_options,
-            runtime_env:
+            runtime_env:,
+            execution_identity: @execution_identity
           )
         else
           raise Error, "Unsupported Rails subject persistence #{persistence.inspect}"

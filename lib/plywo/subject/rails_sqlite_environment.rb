@@ -1,5 +1,6 @@
 require "fileutils"
 require "rbconfig"
+require_relative "execution_identity"
 
 module Plywo
   module Subject
@@ -20,13 +21,15 @@ module Plywo
         state_root: nil,
         bundle_path: nil,
         bundle_app_config: nil,
-        runtime_env: {}
+        runtime_env: {},
+        execution_identity: ExecutionIdentity.new
       )
         @command_runner = command_runner
         @state_root = state_root && Pathname(state_root).expand_path
         @bundle_path = bundle_path && Pathname(bundle_path).expand_path.to_s
         @bundle_app_config = bundle_app_config && Pathname(bundle_app_config).expand_path.to_s
         @runtime_env = runtime_env.transform_keys(&:to_s)
+        @execution_identity = execution_identity
       end
 
       def capabilities
@@ -36,6 +39,7 @@ module Plywo
       def prepare(root:, execution:, role:)
         path = database_path(root:, execution:, role:)
         FileUtils.mkdir_p(path.dirname)
+        @execution_identity.prepare_tree(path.dirname)
         remove_database_files(path)
 
         env = env_for(root:, execution:, role:)

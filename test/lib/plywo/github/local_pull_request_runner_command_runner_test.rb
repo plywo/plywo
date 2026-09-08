@@ -3,6 +3,26 @@ require "json"
 require "rbconfig"
 
 class PlywoGithubLocalPullRequestRunnerCommandRunnerTest < ActiveSupport::TestCase
+  class WorkspaceIdentity
+    attr_reader :prepared_workspace
+
+    def prepare_runtime_home(workspace)
+      @prepared_workspace = workspace.to_s
+    end
+
+    def environment(workspace:)
+      {
+        "HOME" => File.join(workspace.to_s, "tmp", "plywo", "home"),
+        "USER" => "plywo-subject",
+        "LOGNAME" => "plywo-subject"
+      }
+    end
+
+    def spawn_options
+      {}
+    end
+  end
+
   test "inherits only safe host variables and explicit command environment" do
     host_env = {
       "PATH" => ENV.fetch("PATH"),
@@ -50,6 +70,35 @@ class PlywoGithubLocalPullRequestRunnerCommandRunnerTest < ActiveSupport::TestCa
     )
 
     assert_equal "false", output
+  end
+
+  test "subject identity environment overrides caller and host identity values" do
+    identity = WorkspaceIdentity.new
+    runner = Plywo::Github::LocalPullRequestRunner::CommandRunner.new(
+      host_env: {
+        "PATH" => ENV.fetch("PATH"),
+        "HOME" => "/root"
+      },
+      execution_identity: identity
+    )
+
+    output = runner.call(
+      env: {
+        "HOME" => "/attacker-home",
+        "USER" => "root",
+        "LOGNAME" => "root"
+      },
+      command: [
+        RbConfig.ruby,
+        "-e",
+        "print [ENV['HOME'], ENV['USER'], ENV['LOGNAME']].join('|')"
+      ],
+      chdir: Rails.root.to_s
+    )
+
+    expected_home = Rails.root.join("tmp", "plywo", "home").to_s
+    assert_equal Rails.root.to_s, identity.prepared_workspace
+    assert_equal "#{expected_home}|plywo-subject|plywo-subject", output
   end
 
   test "failure diagnostics report environment keys without values" do
