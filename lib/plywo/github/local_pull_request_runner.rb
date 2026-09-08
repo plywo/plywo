@@ -76,6 +76,7 @@ module Plywo
         @fetch_repository = fetch_repository
         subject_discovery ||= Plywo::Subject::Discovery.new(command_runner:)
         setup_plan_compiler ||= Plywo::Subject::SetupPlanCompiler.new
+        subject_bootstrap ||= default_subject_bootstrap
         @subject_lifecycle = subject_lifecycle || Plywo::Subject::Lifecycle.new(
           discovery: subject_discovery,
           bootstrap: subject_bootstrap,
@@ -144,6 +145,15 @@ module Plywo
       end
 
       private
+
+      def default_subject_bootstrap
+        Plywo::Subject::BootstrapExecutor.new(
+          ruby_bundle_bootstrap: Plywo::Subject::RailsBundleBootstrap.new(
+            command_runner: @command_runner,
+            cache_root: @tool_root.join("tmp", "plywo", "bundles")
+          )
+        )
+      end
 
       def assert_local_subject!(context:)
         candidate_repository = context.fetch("candidate_repository")

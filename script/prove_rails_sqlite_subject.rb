@@ -62,9 +62,12 @@ module RailsSqliteSubjectProof
           lockfile: TOOL_LOCKFILE,
           expected_digest: tool_lock_digest
         )
-        subject_bootstrap = Plywo::Subject::RailsBundleBootstrap.new(
+        ruby_bundle_bootstrap = Plywo::Subject::RailsBundleBootstrap.new(
           command_runner:,
           cache_root: bootstrap_root
+        )
+        subject_bootstrap = Plywo::Subject::BootstrapExecutor.new(
+          ruby_bundle_bootstrap:
         )
         runner = Plywo::Github::LocalPullRequestRunner.new(
           root: subject_root,
@@ -269,7 +272,7 @@ module RailsSqliteSubjectProof
     puts "merge_recommendation=#{payload.dig("result", "merge_recommendation")}"
     puts "candidate_config_applied_to_baseline=true"
     puts "subject_persistence_discovered=sqlite"
-    puts "dependency_bootstrap=automatic"
+    puts "dependency_bootstrap=typed_setup_plan"
     puts "capture_runtime=tool_owned_portable_rails"
     puts "customer_plywo_runtime_files=false"
     puts "customer_controller_knows_plywo=false"
