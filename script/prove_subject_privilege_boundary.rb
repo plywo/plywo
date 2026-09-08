@@ -11,6 +11,7 @@ raise "subject execution identity is disabled" unless identity.enabled?
 
 Dir.mktmpdir("plywo-subject-privilege-") do |directory|
   root = Pathname(directory)
+  root.chmod(0o711)
   workspace = root.join("workspace")
   workspace.mkdir
 
