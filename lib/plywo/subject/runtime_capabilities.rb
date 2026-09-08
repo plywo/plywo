@@ -1,12 +1,32 @@
+require "json"
+
 module Plywo
   module Subject
     class RuntimeCapabilities
       Error = Class.new(ArgumentError)
+      ENV_KEY = "PLYWO_EXECUTOR_CAPABILITIES_JSON"
 
       attr_reader :runtimes, :package_managers
 
       def self.ruby_only(version: RUBY_VERSION)
         new(runtimes: { "ruby" => version }, package_managers: {})
+      end
+
+      def self.from_env(env: ENV, ruby_version: RUBY_VERSION)
+        raw = env[ENV_KEY].to_s.strip
+        return ruby_only(version: ruby_version) if raw.empty?
+
+        payload = JSON.parse(raw)
+        unless payload.is_a?(Hash)
+          raise Error, "#{ENV_KEY} must contain a JSON object"
+        end
+
+        new(
+          runtimes: payload.fetch("runtimes", {}),
+          package_managers: payload.fetch("package_managers", {})
+        )
+      rescue JSON::ParserError => error
+        raise Error, "Invalid #{ENV_KEY}: #{error.message}"
       end
 
       def initialize(runtimes:, package_managers:)
