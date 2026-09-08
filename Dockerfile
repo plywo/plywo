@@ -39,8 +39,10 @@ COPY --from=node_runtime /usr/local/lib/node_modules/pnpm /usr/local/lib/node_mo
 
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
-    ln -s ../lib/node_modules/pnpm/bin/pnpm.cjs /usr/local/bin/pnpm && \
-    ln -s ../lib/node_modules/pnpm/bin/pnpx.cjs /usr/local/bin/pnpx && \
+    PNPM_BIN="$(node -p "require('/usr/local/lib/node_modules/pnpm/package.json').bin.pnpm")" && \
+    PNPX_BIN="$(node -p "require('/usr/local/lib/node_modules/pnpm/package.json').bin.pnpx")" && \
+    ln -s "../lib/node_modules/pnpm/${PNPM_BIN}" /usr/local/bin/pnpm && \
+    ln -s "../lib/node_modules/pnpm/${PNPX_BIN}" /usr/local/bin/pnpx && \
     test "$(node --version)" = "v${NODE_VERSION}" && \
     test "$(npm --version)" = "${NPM_VERSION}" && \
     test "$(pnpm --version)" = "${PNPM_VERSION}"
