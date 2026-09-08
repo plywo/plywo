@@ -1,0 +1,17 @@
+# syntax=docker/dockerfile:1
+
+ARG RUBY_VERSION=3.4.10
+FROM ruby:${RUBY_VERSION}-alpine
+
+RUN apk add --no-cache docker-cli docker-cli-compose && \
+    docker --version && \
+    docker compose version
+
+WORKDIR /app
+
+COPY lib/plywo/subject ./lib/plywo/subject
+COPY script/compose_service_provider_server.rb ./script/compose_service_provider_server.rb
+
+ENV PLYWO_COMPOSE_PROVIDER_SOCKET=/run/plywo-provider/provider.sock
+
+CMD ["ruby", "script/compose_service_provider_server.rb"]
