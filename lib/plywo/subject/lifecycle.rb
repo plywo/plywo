@@ -3,11 +3,18 @@ module Plywo
     class Lifecycle
       Session = Data.define(:environment, :env, :setup_plan)
 
-      def initialize(discovery:, bootstrap: nil, environment: nil, setup_plan_compiler: nil)
+      def initialize(
+        discovery:,
+        bootstrap: nil,
+        environment: nil,
+        setup_plan_compiler: nil,
+        service_executor: nil
+      )
         @discovery = discovery
         @bootstrap = bootstrap
         @environment = environment
         @setup_plan_compiler = setup_plan_compiler
+        @service_executor = service_executor || ServiceExecutor.new
       end
 
       def open(root:, execution:, role:, configuration:, setup_configuration: configuration)
@@ -15,24 +22,50 @@ module Plywo
         runtime_env = bootstrap(root:, setup_plan:)
         environment = resolve_environment(root:, configuration: setup_configuration, runtime_env:)
         capture_env = nil
-        services_started = false
+        environment_services_attempted = false
+        service_session = nil
 
         begin
           capture_env = environment.prepare(root:, execution:, role:).merge(configuration.capture_env)
-          services_started = true
+          service_result = @service_executor.start(
+            root:,
+            execution:,
+            role:,
+            env: capture_env,
+            setup_plan:
+          )
+          service_session = service_result.session
+          capture_env.merge!(service_result.env)
+
+          environment_services_attempted = true
           environment.start_services(root:, execution:, role:, env: capture_env)
+          @service_executor.healthcheck(
+            root:,
+            execution:,
+            role:,
+            env: capture_env,
+            setup_plan:,
+            session: service_session
+          )
           environment.healthcheck(root:, execution:, role:, env: capture_env)
 
           yield Session.new(environment:, env: capture_env, setup_plan:)
         ensure
-          if services_started
+          begin
+            environment.stop_services(root:, execution:, role:, env: capture_env) if environment_services_attempted
+          ensure
             begin
-              environment.stop_services(root:, execution:, role:, env: capture_env)
+              @service_executor.stop(
+                root:,
+                execution:,
+                role:,
+                env: capture_env || {},
+                setup_plan:,
+                session: service_session
+              ) if service_session
             ensure
               environment.cleanup(root:, execution:, role:)
             end
-          else
-            environment.cleanup(root:, execution:, role:)
           end
         end
       end
