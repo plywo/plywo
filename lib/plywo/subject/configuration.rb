@@ -13,20 +13,25 @@ module Plywo
       DEFAULT_READINESS_TIMEOUT_SECONDS = 5
       PERSISTENCE_VALUES = %w[auto postgresql sqlite].freeze
       SETUP_MODE_VALUES = %w[auto].freeze
-      SERVICE_TYPE_VALUES = %w[process].freeze
+      SERVICE_TYPE_VALUES = %w[process compose].freeze
       SERVICE_RUNTIME_VALUES = %w[ruby node].freeze
-      READINESS_TYPE_VALUES = %w[http].freeze
+      READINESS_TYPE_VALUES = %w[http tcp].freeze
       TOP_LEVEL_KEYS = %w[version scenario subject].freeze
       SCENARIO_KEYS = %w[path].freeze
       SUBJECT_KEYS = %w[persistence setup services].freeze
       SETUP_KEYS = %w[mode].freeze
-      SERVICE_KEYS = %w[name type runtime entrypoint args port_env url_env readiness].freeze
+      PROCESS_SERVICE_KEYS = %w[name type runtime entrypoint args port_env url_env readiness].freeze
+      COMPOSE_SERVICE_KEYS = %w[name type manifest service target_port url_scheme url_env readiness].freeze
       READINESS_KEYS = %w[type path timeout_seconds].freeze
       SERVICE_NAME_PATTERN = /\A[a-z][a-z0-9_-]*\z/
+      COMPOSE_SERVICE_PATTERN = /\A[a-zA-Z0-9][a-zA-Z0-9_.-]*\z/
+      URL_SCHEME_PATTERN = /\A[a-z][a-z0-9+.-]*\z/
       ENV_KEY_PATTERN = /\A[A-Z_][A-Z0-9_]*\z/
 
       Readiness = Data.define(:type, :path, :timeout_seconds)
-      Service = Data.define(:name, :type, :runtime, :entrypoint, :args, :port_env, :url_env, :readiness)
+      ProcessService = Data.define(:name, :type, :runtime, :entrypoint, :args, :port_env, :url_env, :readiness)
+      Service = ProcessService
+      ComposeService = Data.define(:name, :type, :manifest, :service, :target_port, :url_scheme, :url_env, :readiness)
 
       attr_reader :scenario_path, :persistence, :setup_mode, :services, :source_path
 
@@ -112,7 +117,7 @@ module Plywo
 
         def parse_service(value, index:)
           name = "subject.services[#{index}]"
-          validate_mapping!(value, name:, allowed_keys: SERVICE_KEYS)
+          raise Error, "#{name} must be a mapping" unless value.is_a?(Hash)
 
           service_name = value.fetch("name") { raise Error, "#{name} must declare name" }.to_s
           unless SERVICE_NAME_PATTERN.match?(service_name)
@@ -124,13 +129,24 @@ module Plywo
             raise Error, "Unsupported #{name}.type #{type.inspect}; expected one of #{SERVICE_TYPE_VALUES.join(", ")}"
           end
 
+          case type
+          when "process"
+            parse_process_service(value, name:, service_name:)
+          when "compose"
+            parse_compose_service(value, name:, service_name:)
+          end
+        end
+
+        def parse_process_service(value, name:, service_name:)
+          validate_mapping!(value, name:, allowed_keys: PROCESS_SERVICE_KEYS)
+
           runtime = value.fetch("runtime") { raise Error, "#{name} must declare runtime" }.to_s
           unless SERVICE_RUNTIME_VALUES.include?(runtime)
             raise Error, "Unsupported #{name}.runtime #{runtime.inspect}; expected one of #{SERVICE_RUNTIME_VALUES.join(", ")}"
           end
 
           entrypoint = value.fetch("entrypoint") { raise Error, "#{name} must declare entrypoint" }
-          validate_relative_entrypoint!(entrypoint, name: "#{name}.entrypoint")
+          validate_relative_path!(entrypoint, name: "#{name}.entrypoint")
 
           args = value.fetch("args", [])
           unless args.is_a?(Array) && args.all? { |item| item.is_a?(String) }
@@ -151,13 +167,54 @@ module Plywo
             name: "#{name}.readiness"
           )
 
-          Service.new(
+          ProcessService.new(
             name: service_name,
-            type:,
+            type: "process",
             runtime:,
             entrypoint: entrypoint.dup.freeze,
             args: args.map(&:dup).freeze,
             port_env:,
+            url_env:,
+            readiness:
+          )
+        end
+
+        def parse_compose_service(value, name:, service_name:)
+          validate_mapping!(value, name:, allowed_keys: COMPOSE_SERVICE_KEYS)
+
+          manifest = value.fetch("manifest") { raise Error, "#{name} must declare manifest" }
+          validate_relative_path!(manifest, name: "#{name}.manifest")
+
+          compose_service = value.fetch("service") { raise Error, "#{name} must declare service" }.to_s
+          unless COMPOSE_SERVICE_PATTERN.match?(compose_service)
+            raise Error, "#{name}.service must match #{COMPOSE_SERVICE_PATTERN.inspect}"
+          end
+
+          target_port = value.fetch("target_port") { raise Error, "#{name} must declare target_port" }
+          unless target_port.is_a?(Integer) && target_port.between?(1, 65_535)
+            raise Error, "#{name}.target_port must be an integer between 1 and 65535"
+          end
+
+          url_scheme = value.fetch("url_scheme") { raise Error, "#{name} must declare url_scheme" }.to_s
+          unless URL_SCHEME_PATTERN.match?(url_scheme)
+            raise Error, "#{name}.url_scheme must match #{URL_SCHEME_PATTERN.inspect}"
+          end
+
+          url_env = value.fetch("url_env") { raise Error, "#{name} must declare url_env" }.to_s
+          validate_env_key!(url_env, name: "#{name}.url_env")
+
+          readiness = parse_readiness(
+            value.fetch("readiness") { raise Error, "#{name} must declare readiness" },
+            name: "#{name}.readiness"
+          )
+
+          ComposeService.new(
+            name: service_name,
+            type: "compose",
+            manifest: manifest.dup.freeze,
+            service: compose_service,
+            target_port:,
+            url_scheme:,
             url_env:,
             readiness:
           )
@@ -171,9 +228,13 @@ module Plywo
             raise Error, "Unsupported #{name}.type #{type.inspect}; expected one of #{READINESS_TYPE_VALUES.join(", ")}"
           end
 
-          path = value.fetch("path") { raise Error, "#{name} must declare path" }
-          unless path.is_a?(String) && path.start_with?("/")
-            raise Error, "#{name}.path must be an absolute HTTP path starting with /"
+          path = value["path"]
+          if type == "http"
+            unless path.is_a?(String) && path.start_with?("/")
+              raise Error, "#{name}.path must be an absolute HTTP path starting with /"
+            end
+          elsif !path.nil?
+            raise Error, "#{name}.path is only valid for HTTP readiness"
           end
 
           timeout_seconds = value.fetch("timeout_seconds", DEFAULT_READINESS_TIMEOUT_SECONDS)
@@ -181,7 +242,7 @@ module Plywo
             raise Error, "#{name}.timeout_seconds must be an integer between 1 and 60"
           end
 
-          Readiness.new(type:, path:, timeout_seconds:)
+          Readiness.new(type:, path: path&.dup&.freeze, timeout_seconds:)
         end
 
         def duplicates(values)
@@ -204,7 +265,7 @@ module Plywo
           raise Error, "scenario.path must be an absolute HTTP path starting with /"
         end
 
-        def validate_relative_entrypoint!(value, name:)
+        def validate_relative_path!(value, name:)
           unless value.is_a?(String) && !value.empty?
             raise Error, "#{name} must be a non-empty repository-relative path"
           end
