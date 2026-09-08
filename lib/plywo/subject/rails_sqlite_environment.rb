@@ -1,5 +1,6 @@
 require "fileutils"
 require "rbconfig"
+require_relative "execution_identity"
 
 module Plywo
   module Subject
