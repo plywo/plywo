@@ -52,6 +52,40 @@ class PlywoGithubLocalPullRequestRunnerCommandRunnerTest < ActiveSupport::TestCa
     assert_equal "false", output
   end
 
+  test "subject identity environment overrides caller and host identity values" do
+    identity = Struct.new(:environment, :spawn_options).new(
+      {
+        "HOME" => "/home/plywo-subject",
+        "USER" => "plywo-subject",
+        "LOGNAME" => "plywo-subject"
+      },
+      {}
+    )
+    runner = Plywo::Github::LocalPullRequestRunner::CommandRunner.new(
+      host_env: {
+        "PATH" => ENV.fetch("PATH"),
+        "HOME" => "/root"
+      },
+      execution_identity: identity
+    )
+
+    output = runner.call(
+      env: {
+        "HOME" => "/attacker-home",
+        "USER" => "root",
+        "LOGNAME" => "root"
+      },
+      command: [
+        RbConfig.ruby,
+        "-e",
+        "print [ENV['HOME'], ENV['USER'], ENV['LOGNAME']].join('|')"
+      ],
+      chdir: Rails.root.to_s
+    )
+
+    assert_equal "/home/plywo-subject|plywo-subject|plywo-subject", output
+  end
+
   test "failure diagnostics report environment keys without values" do
     runner = Plywo::Github::LocalPullRequestRunner::CommandRunner.new(
       host_env: { "PATH" => ENV.fetch("PATH"), "HOME" => "/safe/home" }
