@@ -33,6 +33,8 @@ module Plywo
         services = configuration.services
         return plan if services.empty?
 
+        services.each { |service| validate_service_runtime!(service) }
+
         SetupPlan.new(
           framework: plan.framework,
           steps: plan.steps + services.flat_map { |service| service_steps(service) },
@@ -40,6 +42,17 @@ module Plywo
             "explicit_services" => services.map(&:name)
           )
         )
+      end
+
+      def validate_service_runtime!(service)
+        return unless @runtime_capabilities
+        return if @runtime_capabilities.runtime?(service.runtime)
+
+        declared = @runtime_capabilities.runtimes.keys.sort
+        declared_text = declared.empty? ? "none" : declared.join(", ")
+        raise Error,
+          "Explicit service #{service.name.inspect} requires executor runtime #{service.runtime.inspect}; " \
+          "declared runtimes: #{declared_text}"
       end
 
       def service_steps(service)
