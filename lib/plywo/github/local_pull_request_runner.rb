@@ -154,6 +154,9 @@ module Plywo
             command_runner: @command_runner,
             cache_root: @tool_root.join("tmp", "plywo", "bundles")
           ),
+          javascript_dependencies_bootstrap: Plywo::Subject::JavascriptDependenciesBootstrap.new(
+            command_runner: @command_runner
+          ),
           runtime_capabilities:
         )
       end
