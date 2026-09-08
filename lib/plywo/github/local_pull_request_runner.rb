@@ -75,7 +75,7 @@ module Plywo
         @tool_root = Pathname(tool_root).expand_path
         @command_runner = command_runner
         @fetch_repository = fetch_repository
-        runtime_capabilities ||= Plywo::Subject::RuntimeCapabilities.ruby_only
+        runtime_capabilities ||= Plywo::Subject::RuntimeCapabilities.from_env
         subject_discovery ||= Plywo::Subject::Discovery.new(command_runner:)
         setup_plan_compiler ||= Plywo::Subject::SetupPlanCompiler.new(runtime_capabilities:)
         subject_bootstrap ||= default_subject_bootstrap(runtime_capabilities:)
