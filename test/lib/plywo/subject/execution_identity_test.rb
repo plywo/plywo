@@ -39,7 +39,8 @@ class ExecutionIdentityTest < ActiveSupport::TestCase
       )
     end
 
-    assert_match(/requires PLYWO_SUBJECT_UID, PLYWO_SUBJECT_GID, PLYWO_SUBJECT_HOME, and PLYWO_SUBJECT_USER together/, error.message)
+    assert_includes error.message, "requires PLYWO_SUBJECT_UID, PLYWO_SUBJECT_GID"
+    assert_includes error.message, "PLYWO_SUBJECT_HOME, and PLYWO_SUBJECT_USER together"
   end
 
   test "fails closed on invalid uid" do
