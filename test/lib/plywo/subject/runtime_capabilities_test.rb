@@ -44,6 +44,58 @@ class PlywoSubjectRuntimeCapabilitiesTest < ActiveSupport::TestCase
     refute capabilities.package_manager?("bun")
   end
 
+  test "loads executor capabilities from an explicit JSON environment declaration" do
+    env = {
+      Plywo::Subject::RuntimeCapabilities::ENV_KEY => JSON.generate(
+        "runtimes" => {
+          "ruby" => "3.4.10",
+          "node" => "24.20.0"
+        },
+        "package_managers" => {
+          "npm" => "11.19.0"
+        }
+      )
+    }
+
+    capabilities = Plywo::Subject::RuntimeCapabilities.from_env(env:, ruby_version: "3.4.10")
+
+    assert_equal "3.4.10", capabilities.runtime_version("ruby")
+    assert_equal "24.20.0", capabilities.runtime_version("node")
+    assert_equal "11.19.0", capabilities.package_manager_version("npm")
+  end
+
+  test "falls back to Ruby-only capabilities when the executor declaration is absent" do
+    capabilities = Plywo::Subject::RuntimeCapabilities.from_env(env: {}, ruby_version: "3.4.10")
+
+    assert_equal "3.4.10", capabilities.runtime_version("ruby")
+    refute capabilities.runtime?("node")
+    refute capabilities.package_manager?("npm")
+  end
+
+  test "rejects invalid executor capability JSON instead of probing the host" do
+    env = {
+      Plywo::Subject::RuntimeCapabilities::ENV_KEY => "{"
+    }
+
+    error = assert_raises(Plywo::Subject::RuntimeCapabilities::Error) do
+      Plywo::Subject::RuntimeCapabilities.from_env(env:, ruby_version: "3.4.10")
+    end
+
+    assert_match(/Invalid PLYWO_EXECUTOR_CAPABILITIES_JSON/, error.message)
+  end
+
+  test "rejects non-object executor capability JSON" do
+    env = {
+      Plywo::Subject::RuntimeCapabilities::ENV_KEY => "[]"
+    }
+
+    error = assert_raises(Plywo::Subject::RuntimeCapabilities::Error) do
+      Plywo::Subject::RuntimeCapabilities.from_env(env:, ruby_version: "3.4.10")
+    end
+
+    assert_equal "PLYWO_EXECUTOR_CAPABILITIES_JSON must contain a JSON object", error.message
+  end
+
   test "rejects capabilities without a version" do
     error = assert_raises(Plywo::Subject::RuntimeCapabilities::Error) do
       Plywo::Subject::RuntimeCapabilities.new(
