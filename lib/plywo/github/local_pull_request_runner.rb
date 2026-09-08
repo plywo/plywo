@@ -29,11 +29,12 @@ module Plywo
         def call(env:, command:, chdir:)
           stdout = stderr = status = nil
           child_env = nil
+          @execution_identity.prepare_runtime_home(chdir)
 
           Bundler.with_unbundled_env do
             child_env = safe_inherited_environment
               .merge(env.transform_keys(&:to_s))
-              .merge(@execution_identity.environment)
+              .merge(@execution_identity.environment(workspace: chdir))
             stdout, stderr, status = Open3.capture3(
               child_env,
               *command,
