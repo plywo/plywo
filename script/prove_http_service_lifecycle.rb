@@ -4,136 +4,55 @@ require "active_support/core_ext/object/blank"
 require "fileutils"
 require "net/http"
 require "pathname"
-require "rbconfig"
 require "tmpdir"
-require "timeout"
 require "uri"
 
 TOOL_ROOT = Pathname(__dir__).join("..").expand_path.freeze
 
 require TOOL_ROOT.join("lib", "plywo", "subject", "environment").to_s
+require TOOL_ROOT.join("lib", "plywo", "subject", "configuration").to_s
+require TOOL_ROOT.join("lib", "plywo", "subject", "setup_plan").to_s
+require TOOL_ROOT.join("lib", "plywo", "subject", "javascript_package_manager_detector").to_s
+require TOOL_ROOT.join("lib", "plywo", "subject", "rails_setup_plan_detector").to_s
+require TOOL_ROOT.join("lib", "plywo", "subject", "setup_plan_compiler").to_s
+require TOOL_ROOT.join("lib", "plywo", "subject", "service_executor").to_s
 require TOOL_ROOT.join("lib", "plywo", "subject", "lifecycle").to_s
 
 module HttpServiceLifecycleProof
-  Configuration = Data.define(:capture_env)
+  class ProofEnvironment < Plywo::Subject::Environment
+    attr_reader :cleanup_count, :state_dir
 
-  class HttpServiceEnvironment < Plywo::Subject::Environment
-    attr_reader :cleanup_count, :last_pid, :service_url, :state_dir, :stop_count
-
-    def initialize(status:)
-      @status = status
+    def initialize
       @cleanup_count = 0
-      @stop_count = 0
     end
 
     def prepare(root:, execution:, role:)
-      @state_dir = Pathname(Dir.mktmpdir("plywo-http-service-#{role}-"))
-      {
-        "PLYWO_HTTP_SERVICE_STATE_DIR" => @state_dir.to_s
-      }
+      @state_dir = Pathname(Dir.mktmpdir("plywo-subject-state-#{role}-"))
+      { "PLYWO_SUBJECT_STATE_DIR" => @state_dir.to_s }
     end
 
     def env_for(root:, execution:, role:)
       {}
     end
 
-    def start_services(root:, execution:, role:, env:)
-      reader, writer = IO.pipe
-      child_code = <<~RUBY
-        require "socket"
-
-        STDOUT.sync = true
-        status = #{@status}
-        server = TCPServer.new("127.0.0.1", 0)
-        puts server.addr[1]
-
-        trap("TERM") do
-          server.close rescue nil
-          exit! 0
-        end
-
-        loop do
-          client = server.accept
-          begin
-            while (line = client.gets)
-              break if line == "\\r\\n"
-            end
-
-            body = status == 200 ? "OK" : "NOT READY"
-            reason = status == 200 ? "OK" : "Service Unavailable"
-            response =
-              "HTTP/1.1 " + status.to_s + " " + reason + "\\r\\n" +
-              "Content-Type: text/plain\\r\\n" +
-              "Content-Length: " + body.bytesize.to_s + "\\r\\n" +
-              "Connection: close\\r\\n\\r\\n" +
-              body
-            client.write(response)
-          ensure
-            client.close rescue nil
-          end
-        end
-      RUBY
-
-      stderr_path = @state_dir.join("service.stderr")
-      @last_pid = Process.spawn(
-        RbConfig.ruby,
-        "-e",
-        child_code,
-        out: writer,
-        err: stderr_path.to_s
-      )
-      writer.close
-
-      port_line = Timeout.timeout(5) { reader.gets }
-      reader.close
-      raise "HTTP service exited before publishing its dynamic port" unless port_line
-
-      port = Integer(port_line.strip, 10)
-      @service_url = "http://127.0.0.1:#{port}/health"
-      env["PLYWO_HTTP_SERVICE_URL"] = @service_url
-      @state_dir.join("service.pid").write("#{@last_pid}\n")
-      @state_dir.join("service.url").write("#{@service_url}\n")
-    ensure
-      writer&.close unless writer&.closed?
-      reader&.close unless reader&.closed?
-    end
-
-    def healthcheck(root:, execution:, role:, env:)
-      uri = URI(env.fetch("PLYWO_HTTP_SERVICE_URL"))
-      response = Net::HTTP.start(
-        uri.host,
-        uri.port,
-        open_timeout: 1,
-        read_timeout: 1
-      ) { |http| http.get(uri.request_uri) }
-      return if response.code == "200" && response.body == "OK"
-
-      raise "HTTP service readiness failed: status=#{response.code} body=#{response.body.inspect}"
-    end
-
-    def stop_services(root:, execution:, role:, env:)
-      @stop_count += 1
-      return unless @last_pid
-
-      begin
-        Process.kill("TERM", @last_pid)
-      rescue Errno::ESRCH
-        return
-      end
-
-      begin
-        Timeout.timeout(2) { Process.wait(@last_pid) }
-      rescue Timeout::Error
-        Process.kill("KILL", @last_pid) rescue nil
-        Process.wait(@last_pid) rescue nil
-      rescue Errno::ECHILD
-        nil
-      end
-    end
-
     def cleanup(root:, execution:, role:)
       @cleanup_count += 1
       FileUtils.rm_rf(@state_dir) if @state_dir
+    end
+  end
+
+  class RecordingServiceExecutor < Plywo::Subject::ServiceExecutor
+    attr_reader :last_pid, :last_state_dir, :last_url
+
+    def start(**arguments)
+      result = super
+      if result.session
+        service = result.session.services.fetch(0)
+        @last_pid = service.pid
+        @last_state_dir = result.session.state_dir
+        @last_url = service.url
+      end
+      result
     end
 
     def process_alive?
@@ -154,83 +73,197 @@ module HttpServiceLifecycleProof
     success = prove_success_path
     failure = prove_readiness_failure_path
 
-    puts "HTTP subject service lifecycle proof"
-    puts "dynamic_port_assigned=true"
+    puts "Configured HTTP subject service lifecycle proof"
+    puts "configuration_contract=plywo_yml"
+    puts "setup_plan_start_operation=#{success.fetch(:start_operation)}"
+    puts "setup_plan_healthcheck_operation=#{success.fetch(:healthcheck_operation)}"
+    puts "setup_plan_stop_operation=#{success.fetch(:stop_operation)}"
+    puts "service_runtime=#{success.fetch(:runtime)}"
+    puts "service_entrypoint=#{success.fetch(:entrypoint)}"
+    puts "service_provenance=explicit"
+    puts "dynamic_port_assigned=#{URI(success.fetch(:url)).port.positive?}"
     puts "readiness_before_capture=true"
     puts "capture_service_response=#{success.fetch(:body)}"
-    puts "success_service_stopped=#{!success.fetch(:environment).process_alive?}"
-    puts "success_state_cleaned=#{!success.fetch(:state_dir).exist?}"
+    puts "success_service_stopped=#{!success.fetch(:service_executor).process_alive?}"
+    puts "success_service_state_cleaned=#{!success.fetch(:service_state_dir).exist?}"
+    puts "success_subject_state_cleaned=#{!success.fetch(:subject_state_dir).exist?}"
     puts "readiness_failure_capture_skipped=#{!failure.fetch(:capture_ran)}"
-    puts "readiness_failure_service_stopped=#{!failure.fetch(:environment).process_alive?}"
-    puts "readiness_failure_state_cleaned=#{!failure.fetch(:state_dir).exist?}"
-    puts "teardown_order=stop_services_then_cleanup"
+    puts "readiness_failure_service_stopped=#{!failure.fetch(:service_executor).process_alive?}"
+    puts "readiness_failure_service_state_cleaned=#{!failure.fetch(:service_state_dir).exist?}"
+    puts "readiness_failure_subject_state_cleaned=#{!failure.fetch(:subject_state_dir).exist?}"
+    puts "teardown_order=service_stop_then_subject_cleanup"
   end
 
   def prove_success_path
-    environment = HttpServiceEnvironment.new(status: 200)
-    lifecycle = lifecycle_for(environment)
-    capture_ran = false
-    body = nil
-    state_dir = nil
+    Dir.mktmpdir("plywo-configured-service-success-") do |directory|
+      root = Pathname(directory)
+      write_subject(root, status: 200, timeout_seconds: 2)
+      configuration = Plywo::Subject::Configuration.load(root:)
+      environment = ProofEnvironment.new
+      service_executor = RecordingServiceExecutor.new
+      lifecycle = lifecycle_for(environment:, service_executor:)
+      capture_ran = false
+      body = nil
+      url = nil
+      subject_state_dir = nil
+      start_operation = healthcheck_operation = stop_operation = nil
+      runtime = entrypoint = nil
 
-    lifecycle.open(
-      root: TOOL_ROOT,
-      execution: Object.new,
-      role: "baseline",
-      configuration: Configuration.new(capture_env: {})
-    ) do |session|
-      capture_ran = true
-      state_dir = Pathname(session.env.fetch("PLYWO_HTTP_SERVICE_STATE_DIR"))
-      raise "Service state must exist during capture" unless state_dir.directory?
+      lifecycle.open(
+        root:,
+        execution: Object.new,
+        role: "baseline",
+        configuration:,
+        setup_configuration: configuration
+      ) do |session|
+        capture_ran = true
+        url = session.env.fetch("MOCK_API_URL")
+        subject_state_dir = Pathname(session.env.fetch("PLYWO_SUBJECT_STATE_DIR"))
+        raise "Subject state must exist during capture" unless subject_state_dir.directory?
+        raise "Service state must exist during capture" unless service_executor.last_state_dir.directory?
 
-      uri = URI(session.env.fetch("PLYWO_HTTP_SERVICE_URL"))
-      response = Net::HTTP.get_response(uri)
-      raise "Expected healthy HTTP service during capture" unless response.code == "200"
+        start_step = session.setup_plan.steps_for("start_services").fetch(0)
+        start_operation = start_step.operation
+        runtime = start_step.details.fetch("runtime")
+        entrypoint = start_step.details.fetch("entrypoint")
+        healthcheck_operation = session.setup_plan.steps_for("healthcheck").fetch(0).operation
+        stop_operation = session.setup_plan.steps_for("stop_services").fetch(0).operation
+        raise "Expected typed Ruby service runtime" unless runtime == "ruby"
+        raise "Expected repository-relative service entrypoint" unless entrypoint == "service.rb"
 
-      body = response.body
-      raise "Unexpected HTTP service response #{body.inspect}" unless body == "OK"
+        response = Net::HTTP.get_response(URI("#{url}/health"))
+        raise "Expected healthy configured service during capture" unless response.code == "200"
+
+        body = response.body
+        raise "Unexpected configured service response #{body.inspect}" unless body == "OK"
+      end
+
+      raise "Lifecycle capture did not run after configured service readiness" unless capture_ran
+      raise "Configured service remained alive after successful capture" if service_executor.process_alive?
+      raise "Expected one subject cleanup after successful capture" unless environment.cleanup_count == 1
+      raise "Configured service state survived teardown" if service_executor.last_state_dir.exist?
+      raise "Subject state survived cleanup" if subject_state_dir.exist?
+
+      return {
+        service_executor:,
+        service_state_dir: service_executor.last_state_dir,
+        subject_state_dir:,
+        body:,
+        url:,
+        start_operation:,
+        healthcheck_operation:,
+        stop_operation:,
+        runtime:,
+        entrypoint:
+      }
     end
-
-    raise "Lifecycle capture did not run after readiness" unless capture_ran
-    raise "HTTP service remained alive after successful capture" if environment.process_alive?
-    raise "Expected one service stop after successful capture" unless environment.stop_count == 1
-    raise "Expected one cleanup after successful capture" unless environment.cleanup_count == 1
-    raise "Service state survived cleanup" if state_dir.exist?
-
-    { environment:, state_dir:, body: }
   end
 
   def prove_readiness_failure_path
-    environment = HttpServiceEnvironment.new(status: 503)
-    lifecycle = lifecycle_for(environment)
-    capture_ran = false
-    error = nil
+    Dir.mktmpdir("plywo-configured-service-failure-") do |directory|
+      root = Pathname(directory)
+      write_subject(root, status: 503, timeout_seconds: 1)
+      configuration = Plywo::Subject::Configuration.load(root:)
+      environment = ProofEnvironment.new
+      service_executor = RecordingServiceExecutor.new
+      lifecycle = lifecycle_for(environment:, service_executor:)
+      capture_ran = false
+      error = nil
 
-    begin
-      lifecycle.open(
-        root: TOOL_ROOT,
-        execution: Object.new,
-        role: "candidate",
-        configuration: Configuration.new(capture_env: {})
-      ) do
-        capture_ran = true
+      begin
+        lifecycle.open(
+          root:,
+          execution: Object.new,
+          role: "candidate",
+          configuration:,
+          setup_configuration: configuration
+        ) do
+          capture_ran = true
+        end
+      rescue Plywo::Subject::ServiceExecutor::Error => exception
+        error = exception
       end
-    rescue RuntimeError => exception
-      error = exception
+
+      raise "Expected configured service readiness failure" unless error
+      raise "Expected readiness failure to report HTTP 503" unless error.message.include?("status=503")
+      raise "Capture ran despite configured service readiness failure" if capture_ran
+      raise "Configured service remained alive after readiness failure" if service_executor.process_alive?
+      raise "Expected one subject cleanup after readiness failure" unless environment.cleanup_count == 1
+      raise "Configured service state survived readiness-failure teardown" if service_executor.last_state_dir.exist?
+      raise "Subject state survived readiness-failure cleanup" if environment.state_dir.exist?
+
+      return {
+        service_executor:,
+        service_state_dir: service_executor.last_state_dir,
+        subject_state_dir: environment.state_dir,
+        capture_ran:
+      }
     end
-
-    raise "Expected readiness failure" unless error&.message&.start_with?("HTTP service readiness failed:")
-    raise "Capture ran despite failed readiness" if capture_ran
-    raise "HTTP service remained alive after readiness failure" if environment.process_alive?
-    raise "Expected one service stop after readiness failure" unless environment.stop_count == 1
-    raise "Expected one cleanup after readiness failure" unless environment.cleanup_count == 1
-    raise "Service state survived readiness-failure cleanup" if environment.state_dir.exist?
-
-    { environment:, state_dir: environment.state_dir, capture_ran: }
   end
 
-  def lifecycle_for(environment)
-    Plywo::Subject::Lifecycle.new(discovery: nil, environment:)
+  def lifecycle_for(environment:, service_executor:)
+    Plywo::Subject::Lifecycle.new(
+      discovery: nil,
+      environment:,
+      setup_plan_compiler: Plywo::Subject::SetupPlanCompiler.new,
+      service_executor:
+    )
+  end
+
+  def write_subject(root, status:, timeout_seconds:)
+    FileUtils.mkdir_p(root.join("bin"))
+    FileUtils.ln_s(TOOL_ROOT.join("Gemfile"), root.join("Gemfile"))
+    FileUtils.ln_s(TOOL_ROOT.join("Gemfile.lock"), root.join("Gemfile.lock"))
+    FileUtils.ln_s(TOOL_ROOT.join("bin", "rails"), root.join("bin", "rails"))
+
+    root.join("service.rb").write(<<~RUBY)
+      require "socket"
+
+      status = Integer(ARGV.fetch(0), 10)
+      server = TCPServer.new("127.0.0.1", Integer(ENV.fetch("MOCK_API_PORT"), 10))
+      trap("TERM") do
+        server.close rescue nil
+        exit! 0
+      end
+
+      loop do
+        client = server.accept
+        begin
+          while (line = client.gets)
+            break if line == "\\r\\n"
+          end
+
+          body = status == 200 ? "OK" : "NOT READY"
+          reason = status == 200 ? "OK" : "Service Unavailable"
+          client.write(
+            "HTTP/1.1 " + status.to_s + " " + reason + "\\r\\n" +
+            "Content-Type: text/plain\\r\\n" +
+            "Content-Length: " + body.bytesize.to_s + "\\r\\n" +
+            "Connection: close\\r\\n\\r\\n" +
+            body
+          )
+        ensure
+          client.close rescue nil
+        end
+      end
+    RUBY
+
+    root.join("plywo.yml").write(<<~YAML)
+      version: 1
+      subject:
+        services:
+          - name: mock-api
+            type: process
+            runtime: ruby
+            entrypoint: service.rb
+            args: ["#{status}"]
+            port_env: MOCK_API_PORT
+            url_env: MOCK_API_URL
+            readiness:
+              type: http
+              path: /health
+              timeout_seconds: #{timeout_seconds}
+    YAML
   end
 end
 

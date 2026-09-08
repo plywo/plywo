@@ -2,7 +2,7 @@ require "test_helper"
 require "tmpdir"
 
 class PlywoSubjectSetupPlanCompilerTest < ActiveSupport::TestCase
-  Configuration = Data.define(:persistence)
+  Configuration = Data.define(:persistence, :services)
 
   class Detector
     def initialize(plan: nil)
@@ -23,8 +23,52 @@ class PlywoSubjectSetupPlanCompilerTest < ActiveSupport::TestCase
     Dir.mktmpdir("plywo-plan-compiler-") do |directory|
       assert_same plan, compiler.call(
         root: Pathname(directory),
-        configuration: Configuration.new(persistence: "auto")
+        configuration: configuration
       )
+    end
+  end
+
+  test "compiles explicit process services into typed lifecycle operations" do
+    compiler = Plywo::Subject::SetupPlanCompiler.new(
+      detectors: [ Detector.new(plan: setup_plan("rails")) ]
+    )
+    service = Plywo::Subject::Configuration::Service.new(
+      name: "mock-api",
+      type: "process",
+      runtime: "ruby",
+      entrypoint: "script/mock_api.rb",
+      args: [ "ready" ].freeze,
+      port_env: "MOCK_API_PORT",
+      url_env: "MOCK_API_URL",
+      readiness: Plywo::Subject::Configuration::Readiness.new(
+        type: "http",
+        path: "/health",
+        timeout_seconds: 4
+      )
+    )
+
+    Dir.mktmpdir("plywo-plan-compiler-") do |directory|
+      compiled = compiler.call(
+        root: Pathname(directory),
+        configuration: configuration(services: [ service ])
+      )
+
+      assert_equal [ "process.start" ], compiled.steps_for("start_services").map(&:operation)
+      assert_equal [ "http.wait_ready" ], compiled.steps_for("healthcheck").map(&:operation)
+      assert_equal [ "process.stop" ], compiled.steps_for("stop_services").map(&:operation)
+      assert_equal [ "mock-api" ], compiled.evidence.fetch("explicit_services")
+
+      start = compiled.steps_for("start_services").fetch(0)
+      assert_equal "explicit", start.provenance
+      assert_equal "ruby", start.details.fetch("runtime")
+      assert_equal "script/mock_api.rb", start.details.fetch("entrypoint")
+      assert_equal [ "ready" ], start.details.fetch("args")
+      assert_equal "MOCK_API_PORT", start.details.fetch("port_env")
+      assert_equal "MOCK_API_URL", start.details.fetch("url_env")
+
+      readiness = compiled.steps_for("healthcheck").fetch(0)
+      assert_equal "/health", readiness.details.fetch("path")
+      assert_equal 4, readiness.details.fetch("timeout_seconds")
     end
   end
 
@@ -46,7 +90,7 @@ class PlywoSubjectSetupPlanCompilerTest < ActiveSupport::TestCase
     Dir.mktmpdir("plywo-plan-compiler-") do |directory|
       compiled = compiler.call(
         root: Pathname(directory),
-        configuration: Configuration.new(persistence: "auto")
+        configuration: configuration
       )
 
       assert_equal "rails", compiled.evidence.fetch("framework")
@@ -64,7 +108,7 @@ class PlywoSubjectSetupPlanCompilerTest < ActiveSupport::TestCase
       error = assert_raises(Plywo::Subject::SetupPlanCompiler::Error) do
         compiler.call(
           root: Pathname(directory),
-          configuration: Configuration.new(persistence: "auto")
+          configuration: configuration
         )
       end
 
@@ -81,7 +125,7 @@ class PlywoSubjectSetupPlanCompilerTest < ActiveSupport::TestCase
       error = assert_raises(Plywo::Subject::SetupPlanCompiler::Error) do
         compiler.call(
           root: Pathname(directory),
-          configuration: Configuration.new(persistence: "auto")
+          configuration: configuration
         )
       end
 
@@ -91,6 +135,10 @@ class PlywoSubjectSetupPlanCompilerTest < ActiveSupport::TestCase
   end
 
   private
+
+  def configuration(services: [])
+    Configuration.new(persistence: "auto", services:)
+  end
 
   def setup_plan(framework)
     Plywo::Subject::SetupPlan.new(
