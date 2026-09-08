@@ -15,6 +15,20 @@ class PlywoSubjectBootstrapExecutorTest < ActiveSupport::TestCase
     end
   end
 
+  class RecordingJavascriptBootstrap
+    attr_reader :calls
+
+    def initialize(environment: {})
+      @environment = environment
+      @calls = []
+    end
+
+    def call(root:, step:)
+      @calls << { root:, step: }
+      @environment
+    end
+  end
+
   test "executes ruby.bundle through the typed Ruby handler when Ruby is declared" do
     ruby_bootstrap = RecordingRubyBootstrap.new
     executor = bootstrap_executor(ruby_bootstrap:)
@@ -85,7 +99,8 @@ class PlywoSubjectBootstrapExecutorTest < ActiveSupport::TestCase
   end
 
   test "JavaScript bootstrap requires a declared Node runtime" do
-    executor = bootstrap_executor
+    javascript_bootstrap = RecordingJavascriptBootstrap.new
+    executor = bootstrap_executor(javascript_bootstrap:)
     plan = javascript_plan(manager: "pnpm", lockfile: "pnpm-lock.yaml")
 
     error = assert_raises(Plywo::Subject::BootstrapExecutor::Error) do
@@ -96,10 +111,13 @@ class PlywoSubjectBootstrapExecutorTest < ActiveSupport::TestCase
       'Bootstrap operation javascript.dependencies requires executor runtime capability "node"',
       error.message
     )
+    assert_empty javascript_bootstrap.calls
   end
 
   test "JavaScript bootstrap requires the detected package manager capability" do
+    javascript_bootstrap = RecordingJavascriptBootstrap.new
     executor = bootstrap_executor(
+      javascript_bootstrap:,
       runtime_capabilities: capabilities(runtimes: { "ruby" => "3.4.10", "node" => "24.0.0" })
     )
     plan = javascript_plan(manager: "pnpm", lockfile: "pnpm-lock.yaml")
@@ -112,26 +130,33 @@ class PlywoSubjectBootstrapExecutorTest < ActiveSupport::TestCase
       'Bootstrap operation javascript.dependencies requires executor package-manager capability "pnpm"',
       error.message
     )
+    assert_empty javascript_bootstrap.calls
   end
 
-  test "declared JavaScript capabilities do not imply an unimplemented handler" do
+  test "declared JavaScript capabilities dispatch to the typed handler" do
+    javascript_bootstrap = RecordingJavascriptBootstrap.new
     executor = bootstrap_executor(
+      javascript_bootstrap:,
       runtime_capabilities: capabilities(
         runtimes: { "ruby" => "3.4.10", "node" => "24.0.0" },
         package_managers: { "pnpm" => "10.0.0" }
       )
     )
     plan = javascript_plan(manager: "pnpm", lockfile: "pnpm-lock.yaml")
+    root = Pathname("/tmp/customer")
 
-    error = assert_raises(Plywo::Subject::BootstrapExecutor::Error) do
-      executor.call(root: Pathname("/tmp/customer"), setup_plan: plan)
-    end
+    environment = executor.call(root:, setup_plan: plan)
 
-    assert_match(/no typed JavaScript dependency handler is implemented yet/, error.message)
+    assert_equal({}, environment)
+    assert_equal 1, javascript_bootstrap.calls.length
+    assert_equal root, javascript_bootstrap.calls.first.fetch(:root)
+    assert_equal "javascript.dependencies", javascript_bootstrap.calls.first.fetch(:step).operation
   end
 
   test "Bun bootstrap requires a Bun runtime rather than Node" do
+    javascript_bootstrap = RecordingJavascriptBootstrap.new
     executor = bootstrap_executor(
+      javascript_bootstrap:,
       runtime_capabilities: capabilities(
         package_managers: { "bun" => "1.0.0" }
       )
@@ -146,6 +171,7 @@ class PlywoSubjectBootstrapExecutorTest < ActiveSupport::TestCase
       'Bootstrap operation javascript.dependencies requires executor runtime capability "bun"',
       error.message
     )
+    assert_empty javascript_bootstrap.calls
   end
 
   test "never interprets an unknown operation as a command" do
@@ -181,10 +207,12 @@ class PlywoSubjectBootstrapExecutorTest < ActiveSupport::TestCase
 
   def bootstrap_executor(
     ruby_bootstrap: RecordingRubyBootstrap.new,
+    javascript_bootstrap: RecordingJavascriptBootstrap.new,
     runtime_capabilities: capabilities
   )
     Plywo::Subject::BootstrapExecutor.new(
       ruby_bundle_bootstrap: ruby_bootstrap,
+      javascript_dependencies_bootstrap: javascript_bootstrap,
       runtime_capabilities:
     )
   end
