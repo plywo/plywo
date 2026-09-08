@@ -3,34 +3,13 @@
     {
       "warning_type": "Command Injection",
       "warning_code": 14,
-      "fingerprint": "c12048d8fea25843fe3a2dae311062b6ec176c0ff70889074a1797f0860d0cb2",
-      "check_name": "Execute",
-      "message": "Possible command injection",
-      "file": "lib/plywo/subject/service_executor.rb",
-      "line": 164,
-      "link": "https://brakemanscanner.org/docs/warning_types/command_injection/",
-      "code": "Process.spawn(safe_inherited_environment.merge(env).merge(step.details.fetch(\"port_env\") => allocate_port.to_s, step.details.fetch(\"url_env\") => (\"http://#{\"127.0.0.1\"}:#{allocate_port}\")), RbConfig.ruby, \"--\", resolve_entrypoint(:root => root, :value => step.details.fetch(\"entrypoint\"), :service_name => step.details.fetch(\"name\")).to_s, *step.details.fetch(\"args\"), :chdir => root.to_s, :out => state_dir.join(\"#{step.details.fetch(\"name\")}.stdout.log\").to_s, :err => state_dir.join(\"#{step.details.fetch(\"name\")}.stderr.log\").to_s, :unsetenv_others => true)",
-      "render_path": null,
-      "location": {
-        "type": "method",
-        "class": "Plywo::Subject::ServiceExecutor",
-        "method": "start_process"
-      },
-      "user_input": "allocate_port",
-      "confidence": "Medium",
-      "cwe_id": [77],
-      "note": "Intentional customer-code execution boundary. ServiceExecutor runs an explicitly declared repository-contained Ruby entrypoint only in the executor. The executable is fixed to RbConfig.ruby, no shell is invoked, entrypoint realpath must stay inside the disposable customer checkout, and arguments are passed as argv. The control plane never executes customer code, executor deployments receive no GitHub App private key or webhook secret, and the repository read capability is not persisted. Production Lab and remote-executor topology prove these surrounding isolation boundaries. This suppresses only this exact Brakeman fingerprint, not the Execute check globally."
-    },
-    {
-      "warning_type": "Command Injection",
-      "warning_code": 14,
-      "fingerprint": "198ea485864679ccacb0b56769f4dc699c6aec5fb4705b490592a4902ed34ac1",
+      "fingerprint": "c0fbefede1729c2613ff84a7060b6ad82d0fa365f2ae72a92c7b2a6e26be4ae4",
       "check_name": "Execute",
       "message": "Possible command injection",
       "file": "lib/plywo/subject/service_executor.rb",
       "line": 176,
       "link": "https://brakemanscanner.org/docs/warning_types/command_injection/",
-      "code": "Process.spawn(safe_inherited_environment.merge(env).merge(step.details.fetch(\"port_env\") => allocate_port.to_s, step.details.fetch(\"url_env\") => (\"http://#{\"127.0.0.1\"}:#{allocate_port}\")), \"node\", \"--\", resolve_entrypoint(:root => root, :value => step.details.fetch(\"entrypoint\"), :service_name => step.details.fetch(\"name\")).to_s, *step.details.fetch(\"args\"), :chdir => root.to_s, :out => state_dir.join(\"#{step.details.fetch(\"name\")}.stdout.log\").to_s, :err => state_dir.join(\"#{step.details.fetch(\"name\")}.stderr.log\").to_s, :unsetenv_others => true)",
+      "code": "Process.spawn(safe_inherited_environment.merge(env).merge(execution_identity.environment(:workspace => root)).merge(step.details.fetch(\"port_env\") => allocate_port.to_s, step.details.fetch(\"url_env\") => (\"http://#{\"127.0.0.1\"}:#{allocate_port}\")), RbConfig.ruby, \"--\", resolve_entrypoint(:root => root, :value => step.details.fetch(\"entrypoint\"), :service_name => step.details.fetch(\"name\")).to_s, *step.details.fetch(\"args\"), :chdir => root.to_s, :out => state_dir.join(\"#{step.details.fetch(\"name\")}.stdout.log\").to_s, :err => state_dir.join(\"#{step.details.fetch(\"name\")}.stderr.log\").to_s, :unsetenv_others => true, **execution_identity.spawn_options)",
       "render_path": null,
       "location": {
         "type": "method",
@@ -40,7 +19,28 @@
       "user_input": "allocate_port",
       "confidence": "Medium",
       "cwe_id": [77],
-      "note": "Intentional customer-code execution boundary for the explicit Node provider. SetupPlanCompiler permits runtime=node only when the executor declares a Node runtime capability. ServiceExecutor then selects the fixed literal node executable; customer configuration cannot choose an executable or shell command. No shell is invoked, the entrypoint realpath must stay inside the disposable customer checkout, and arguments are passed as argv. The production Docker proof verifies the declared Node version against the actual executable and runs readiness plus teardown through Configuration -> SetupPlanCompiler -> ServiceExecutor -> Lifecycle. The control plane never executes customer code and executor deployments do not receive GitHub App private keys or webhook secrets. This suppresses only this exact Brakeman fingerprint, not the Execute check globally."
+      "note": "Intentional customer-code execution boundary. ServiceExecutor runs an explicitly declared repository-contained Ruby entrypoint only in the executor. The executable is fixed to RbConfig.ruby, no shell is invoked, entrypoint realpath must stay inside the disposable customer checkout, and arguments are passed as argv. Customer execution runs under the dedicated non-root subject UID/GID with a worktree-local HOME; sibling baseline/candidate worktrees are sealed while inactive. The control plane never executes customer code, executor deployments receive no GitHub App private key or webhook secret, and the repository read capability is not persisted. Production Lab and remote-executor topology prove these surrounding isolation boundaries. This suppresses only this exact Brakeman fingerprint, not the Execute check globally."
+    },
+    {
+      "warning_type": "Command Injection",
+      "warning_code": 14,
+      "fingerprint": "b6c16f24963a9d866f85a3dbdcd0568f31c5668a542b40655067522a0dec7d03",
+      "check_name": "Execute",
+      "message": "Possible command injection",
+      "file": "lib/plywo/subject/service_executor.rb",
+      "line": 189,
+      "link": "https://brakemanscanner.org/docs/warning_types/command_injection/",
+      "code": "Process.spawn(safe_inherited_environment.merge(env).merge(execution_identity.environment(:workspace => root)).merge(step.details.fetch(\"port_env\") => allocate_port.to_s, step.details.fetch(\"url_env\") => (\"http://#{\"127.0.0.1\"}:#{allocate_port}\")), \"node\", \"--\", resolve_entrypoint(:root => root, :value => step.details.fetch(\"entrypoint\"), :service_name => step.details.fetch(\"name\")).to_s, *step.details.fetch(\"args\"), :chdir => root.to_s, :out => state_dir.join(\"#{step.details.fetch(\"name\")}.stdout.log\").to_s, :err => state_dir.join(\"#{step.details.fetch(\"name\")}.stderr.log\").to_s, :unsetenv_others => true, **execution_identity.spawn_options)",
+      "render_path": null,
+      "location": {
+        "type": "method",
+        "class": "Plywo::Subject::ServiceExecutor",
+        "method": "start_process"
+      },
+      "user_input": "allocate_port",
+      "confidence": "Medium",
+      "cwe_id": [77],
+      "note": "Intentional customer-code execution boundary for the explicit Node provider. SetupPlanCompiler permits runtime=node only when the executor declares a Node runtime capability. ServiceExecutor then selects the fixed literal node executable; customer configuration cannot choose an executable or shell command. No shell is invoked, the entrypoint realpath must stay inside the disposable customer checkout, and arguments are passed as argv. Customer execution runs under the dedicated non-root subject UID/GID with a worktree-local HOME; sibling baseline/candidate worktrees are sealed while inactive. The production Docker proof verifies the declared Node version against the actual executable and runs readiness plus teardown through Configuration -> SetupPlanCompiler -> ServiceExecutor -> Lifecycle. The control plane never executes customer code and executor deployments do not receive GitHub App private keys or webhook secrets. This suppresses only this exact Brakeman fingerprint, not the Execute check globally."
     }
   ],
   "brakeman_version": "8.0.6"
