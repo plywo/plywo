@@ -1,5 +1,6 @@
 require "json"
 require "pathname"
+require "securerandom"
 require "socket"
 
 module Plywo
