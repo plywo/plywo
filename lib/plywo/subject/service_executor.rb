@@ -6,6 +6,7 @@ require "socket"
 require "timeout"
 require "tmpdir"
 require "uri"
+require_relative "execution_identity"
 
 module Plywo
   module Subject
