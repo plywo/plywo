@@ -40,6 +40,7 @@ COPY Gemfile Gemfile.lock ./
 RUN bundle install
 
 COPY . .
+RUN ruby script/prove_node_npm_executor_capability.rb
 
 ENV RAILS_ENV=production \
     RAILS_LOG_TO_STDOUT=1
