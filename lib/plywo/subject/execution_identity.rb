@@ -28,22 +28,22 @@ module Plywo
         end
 
         new(
-          uid: integer!(uid, ENV_UID),
-          gid: integer!(gid, ENV_GID),
+          uid: positive_integer!(uid, ENV_UID),
+          gid: positive_integer!(gid, ENV_GID),
           home:,
           user:
         )
       end
 
-      def self.integer!(value, key)
+      def self.positive_integer!(value, key)
         integer = Integer(value, 10)
-        raise ArgumentError if integer.negative?
+        raise ArgumentError unless integer.positive?
 
         integer
       rescue ArgumentError, TypeError
-        raise Error, "#{key} must be a non-negative integer"
+        raise Error, "#{key} must be a positive integer"
       end
-      private_class_method :integer!
+      private_class_method :positive_integer!
 
       def initialize(uid: nil, gid: nil, home: nil, user: nil)
         @uid = uid
@@ -57,6 +57,18 @@ module Plywo
 
         if [ uid, gid, home, user ].any?(&:nil?)
           raise Error, "Enabled subject execution identity requires uid, gid, home, and user"
+        end
+        unless uid.to_i.positive? && gid.to_i.positive?
+          raise Error, "Enabled subject execution identity requires positive uid and gid"
+        end
+        if uid.to_i == @executor_uid
+          raise Error, "Subject execution uid must differ from executor uid #{@executor_uid}"
+        end
+        unless Pathname(home.to_s).absolute?
+          raise Error, "Subject execution home must be an absolute path"
+        end
+        if user.to_s.empty?
+          raise Error, "Subject execution user must not be empty"
         end
       end
 
@@ -124,7 +136,8 @@ module Plywo
         return unless enabled?
 
         path = Pathname(path)
-        FileUtils.touch(path)
+        FileUtils.mkdir_p(path.dirname)
+        File.open(path, "w") {}
         FileUtils.chown(uid, gid, path)
         File.chmod(0o600, path)
       rescue Errno::EPERM, Errno::EACCES => error
