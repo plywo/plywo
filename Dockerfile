@@ -64,7 +64,8 @@ COPY . .
 RUN bundle exec ruby script/prove_node_npm_executor_capability.rb && \
     bundle exec ruby script/prove_pnpm_executor_capability.rb && \
     bundle exec ruby script/prove_yarn_berry_executor_capability.rb && \
-    bundle exec ruby script/prove_http_service_lifecycle.rb
+    bundle exec ruby script/prove_http_service_lifecycle.rb && \
+    bundle exec ruby script/prove_node_service_runtime.rb
 
 ENV RAILS_ENV=production \
     RAILS_LOG_TO_STDOUT=1

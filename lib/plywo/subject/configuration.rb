@@ -14,7 +14,7 @@ module Plywo
       PERSISTENCE_VALUES = %w[auto postgresql sqlite].freeze
       SETUP_MODE_VALUES = %w[auto].freeze
       SERVICE_TYPE_VALUES = %w[process].freeze
-      SERVICE_RUNTIME_VALUES = %w[ruby].freeze
+      SERVICE_RUNTIME_VALUES = %w[ruby node].freeze
       READINESS_TYPE_VALUES = %w[http].freeze
       TOP_LEVEL_KEYS = %w[version scenario subject].freeze
       SCENARIO_KEYS = %w[path].freeze
