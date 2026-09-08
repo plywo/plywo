@@ -116,38 +116,48 @@ module Plywo
         capture_configuration = Plywo::Subject::Configuration.load(root: paths.fetch(:candidate_root))
         baseline_setup_configuration = Plywo::Subject::Configuration.load(root: paths.fetch(:baseline_root))
 
-        @subject_lifecycle.open(
+        with_subject_workspace(
           root: paths.fetch(:baseline_root),
-          execution:,
-          role: "base",
-          configuration: capture_configuration,
-          setup_configuration: baseline_setup_configuration
-        ) do |baseline_subject|
-          capture_subject!(
-            execution:,
+          output: paths.fetch(:baseline_output)
+        ) do
+          @subject_lifecycle.open(
             root: paths.fetch(:baseline_root),
-            label: context.fetch("baseline_ref"),
-            sha: execution.baseline_sha,
-            environment: baseline_subject.env,
-            output: paths.fetch(:baseline_output)
-          )
+            execution:,
+            role: "base",
+            configuration: capture_configuration,
+            setup_configuration: baseline_setup_configuration
+          ) do |baseline_subject|
+            capture_subject!(
+              execution:,
+              root: paths.fetch(:baseline_root),
+              label: context.fetch("baseline_ref"),
+              sha: execution.baseline_sha,
+              environment: baseline_subject.env,
+              output: paths.fetch(:baseline_output)
+            )
+          end
         end
 
-        @subject_lifecycle.open(
+        with_subject_workspace(
           root: paths.fetch(:candidate_root),
-          execution:,
-          role: "candidate",
-          configuration: capture_configuration,
-          setup_configuration: capture_configuration
-        ) do |candidate_subject|
-          capture_subject!(
-            execution:,
+          output: paths.fetch(:candidate_output)
+        ) do
+          @subject_lifecycle.open(
             root: paths.fetch(:candidate_root),
-            label: context.fetch("candidate_ref"),
-            sha: execution.candidate_sha,
-            environment: candidate_subject.env,
-            output: paths.fetch(:candidate_output)
-          )
+            execution:,
+            role: "candidate",
+            configuration: capture_configuration,
+            setup_configuration: capture_configuration
+          ) do |candidate_subject|
+            capture_subject!(
+              execution:,
+              root: paths.fetch(:candidate_root),
+              label: context.fetch("candidate_ref"),
+              sha: execution.candidate_sha,
+              environment: candidate_subject.env,
+              output: paths.fetch(:candidate_output)
+            )
+          end
         end
 
         compare(
@@ -204,7 +214,7 @@ module Plywo
       def execution_paths(execution:)
         directory = @root.join("tmp", "plywo", "github", execution.execution_id.delete_prefix("github-")[0, 16])
         FileUtils.mkdir_p(directory)
-        @execution_identity.prepare_directory(directory)
+        @execution_identity.prepare_parent_directory(directory)
 
         {
           baseline_root: directory.join("base"),
@@ -218,11 +228,19 @@ module Plywo
         cleanup_worktree(path)
         FileUtils.rm_rf(path)
         run!(command: [ "git", "worktree", "add", "--detach", path.to_s, sha ], chdir: @root)
-        @execution_identity.prepare_tree(path)
+        @execution_identity.seal_tree(path)
+      end
+
+      def with_subject_workspace(root:, output:)
+        @execution_identity.prepare_tree(root)
+        @execution_identity.prepare_output(output)
+        yield
+      ensure
+        @execution_identity.seal_output(output) if output
+        @execution_identity.seal_tree(root) if root&.exist?
       end
 
       def capture_subject!(execution:, root:, label:, sha:, environment:, output:)
-        @execution_identity.prepare_tree(root)
         capture_script = @capture_runtime.script_for(root:, tool_root: @tool_root)
         env = environment.merge(
           "PLYWO_RUN_ID" => execution.execution_id,
