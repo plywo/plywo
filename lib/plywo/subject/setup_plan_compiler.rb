@@ -33,7 +33,7 @@ module Plywo
         services = configuration.services
         return plan if services.empty?
 
-        services.each { |service| validate_service_runtime!(service) }
+        services.each { |service| validate_service_capability!(service) }
 
         SetupPlan.new(
           framework: plan.framework,
@@ -44,8 +44,20 @@ module Plywo
         )
       end
 
-      def validate_service_runtime!(service)
+      def validate_service_capability!(service)
         return unless @runtime_capabilities
+
+        case service.type
+        when "process"
+          validate_service_runtime!(service)
+        when "compose"
+          validate_compose_provider!(service)
+        else
+          raise Error, "Unsupported explicit service type #{service.type.inspect}"
+        end
+      end
+
+      def validate_service_runtime!(service)
         return if @runtime_capabilities.runtime?(service.runtime)
 
         declared = @runtime_capabilities.runtimes.keys.sort
@@ -55,7 +67,28 @@ module Plywo
           "declared runtimes: #{declared_text}"
       end
 
+      def validate_compose_provider!(service)
+        return if @runtime_capabilities.service_provider?("compose")
+
+        declared = @runtime_capabilities.service_providers.keys.sort
+        declared_text = declared.empty? ? "none" : declared.join(", ")
+        raise Error,
+          "Explicit service #{service.name.inspect} requires executor service provider \"compose\"; " \
+          "declared service providers: #{declared_text}"
+      end
+
       def service_steps(service)
+        case service.type
+        when "process"
+          process_service_steps(service)
+        when "compose"
+          compose_service_steps(service)
+        else
+          raise Error, "Unsupported explicit service type #{service.type.inspect}"
+        end
+      end
+
+      def process_service_steps(service)
         [
           {
             phase: "start_services",
@@ -70,17 +103,7 @@ module Plywo
               url_env: service.url_env
             }
           },
-          {
-            phase: "healthcheck",
-            operation: "http.wait_ready",
-            provenance: "explicit",
-            details: {
-              name: service.name,
-              url_env: service.url_env,
-              path: service.readiness.path,
-              timeout_seconds: service.readiness.timeout_seconds
-            }
-          },
+          readiness_step(service),
           {
             phase: "stop_services",
             operation: "process.stop",
@@ -90,6 +113,49 @@ module Plywo
             }
           }
         ]
+      end
+
+      def compose_service_steps(service)
+        [
+          {
+            phase: "start_services",
+            operation: "compose.run",
+            provenance: "explicit",
+            details: {
+              name: service.name,
+              manifest: service.manifest,
+              service: service.service,
+              target_port: service.target_port,
+              url_scheme: service.url_scheme,
+              url_env: service.url_env
+            }
+          },
+          readiness_step(service),
+          {
+            phase: "stop_services",
+            operation: "compose.stop",
+            provenance: "explicit",
+            details: {
+              name: service.name
+            }
+          }
+        ]
+      end
+
+      def readiness_step(service)
+        details = {
+          name: service.name,
+          url_env: service.url_env,
+          timeout_seconds: service.readiness.timeout_seconds
+        }
+        details[:path] = service.readiness.path if service.readiness.type == "http"
+
+        {
+          phase: "healthcheck",
+          operation: "#{service.readiness.type}.wait_ready",
+          provenance: "explicit",
+          details:
+        }
       end
 
       def with_executor_capabilities(plan)
