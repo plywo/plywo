@@ -38,14 +38,32 @@ class PlywoSubjectLifecycleTest < ActiveSupport::TestCase
   end
 
   class RecordingDiscovery
+    attr_reader :configuration
+
     def initialize(events:, environment:)
       @events = events
       @environment = environment
     end
 
     def resolve(root:, configuration:, runtime_env:)
+      @configuration = configuration
       @events << [ :discover, runtime_env ]
       @environment
+    end
+  end
+
+  class RecordingSetupPlanCompiler
+    attr_reader :configuration
+
+    def initialize(events:, setup_plan:)
+      @events = events
+      @setup_plan = setup_plan
+    end
+
+    def call(root:, configuration:)
+      @configuration = configuration
+      @events << :compile_setup_plan
+      @setup_plan
     end
   end
 
@@ -66,6 +84,60 @@ class PlywoSubjectLifecycleTest < ActiveSupport::TestCase
     end
 
     assert_equal [
+      :bootstrap,
+      [ :discover, { "FROM_BOOTSTRAP" => "1" } ],
+      :prepare,
+      :start_services,
+      :healthcheck,
+      :capture,
+      :stop_services,
+      :cleanup
+    ], events
+  end
+
+  test "compiles setup before bootstrap and keeps capture configuration separate" do
+    events = []
+    environment = RecordingEnvironment.new(events:)
+    discovery = RecordingDiscovery.new(events:, environment:)
+    setup_plan = Plywo::Subject::SetupPlan.new(
+      framework: "rails",
+      steps: [
+        {
+          phase: "cleanup",
+          operation: "subject.state_cleanup",
+          provenance: "executor_default"
+        }
+      ]
+    )
+    compiler = RecordingSetupPlanCompiler.new(events:, setup_plan:)
+    bootstrap = lambda do |root:|
+      events << :bootstrap
+      { "FROM_BOOTSTRAP" => "1" }
+    end
+    lifecycle = Plywo::Subject::Lifecycle.new(
+      discovery:,
+      bootstrap:,
+      setup_plan_compiler: compiler
+    )
+    capture_configuration = Configuration.new(capture_env: { "FROM_CAPTURE" => "candidate" })
+    setup_configuration = Object.new
+
+    lifecycle.open(
+      root: Pathname("/tmp/subject"),
+      execution: Object.new,
+      role: "base",
+      configuration: capture_configuration,
+      setup_configuration:
+    ) do |session|
+      events << :capture
+      assert_same setup_plan, session.setup_plan
+      assert_equal "candidate", session.env.fetch("FROM_CAPTURE")
+    end
+
+    assert_same setup_configuration, compiler.configuration
+    assert_same setup_configuration, discovery.configuration
+    assert_equal [
+      :compile_setup_plan,
       :bootstrap,
       [ :discover, { "FROM_BOOTSTRAP" => "1" } ],
       :prepare,
