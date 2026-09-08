@@ -29,6 +29,52 @@ class PlywoSubjectRailsSetupPlanDetectorTest < ActiveSupport::TestCase
     end
   end
 
+  test "composes reproducible JavaScript dependency bootstrap into a Rails plan" do
+    with_subject do |root|
+      write(root, "Gemfile", "source \"https://rubygems.org\"\ngem \"rails\"\n")
+      write(root, "Gemfile.lock", "BUNDLED WITH\n   2.6.9\n")
+      write(root, "bin/rails", "#!/usr/bin/env ruby\n")
+      write(root, "package.json", <<~JSON)
+        {
+          "packageManager": "pnpm@10.15.0"
+        }
+      JSON
+      write(root, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+
+      plan = detector.call(
+        root:,
+        configuration: Configuration.new(persistence: "auto")
+      )
+
+      bootstrap_steps = plan.steps_for("bootstrap")
+      assert_equal [ "ruby.bundle", "javascript.dependencies" ], bootstrap_steps.map(&:operation)
+      javascript_step = bootstrap_steps.last
+      assert_equal "pnpm", javascript_step.details.fetch("manager")
+      assert_equal "pnpm-lock.yaml", javascript_step.details.fetch("lockfile")
+      assert_equal true, javascript_step.details.fetch("frozen_lockfile")
+      assert_equal "pnpm", plan.evidence.fetch("javascript_package_manager")
+      assert_equal "pnpm@10.15.0", plan.evidence.fetch("package_manager_declaration")
+    end
+  end
+
+  test "fails closed when a Rails package.json is not reproducibly locked" do
+    with_subject do |root|
+      write(root, "Gemfile", "source \"https://rubygems.org\"\ngem \"rails\"\n")
+      write(root, "Gemfile.lock", "BUNDLED WITH\n   2.6.9\n")
+      write(root, "bin/rails", "#!/usr/bin/env ruby\n")
+      write(root, "package.json", "{}\n")
+
+      error = assert_raises(Plywo::Subject::JavascriptPackageManagerDetector::Error) do
+        detector.call(
+          root:,
+          configuration: Configuration.new(persistence: "auto")
+        )
+      end
+
+      assert_match(/requires exactly one supported committed lockfile/, error.message)
+    end
+  end
+
   test "returns nil when Rails evidence is absent" do
     with_subject do |root|
       write(root, "package.json", "{}\n")
@@ -42,7 +88,7 @@ class PlywoSubjectRailsSetupPlanDetectorTest < ActiveSupport::TestCase
 
   test "fails closed when a Rails subject has no committed lockfile" do
     with_subject do |root|
-      write(root, "Gemfile", "source \"https://rubygems.org\"\n")
+      write(root, "Gemfile", "source \"https://rubygems.org\"\ngem \"rails\"\n")
       write(root, "bin/rails", "#!/usr/bin/env ruby\n")
 
       error = assert_raises(Plywo::Subject::RailsSetupPlanDetector::Error) do
