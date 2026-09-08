@@ -23,6 +23,7 @@ module Plywo
       ].freeze
       SUPPORTED_START_OPERATION = "process.start".freeze
       SUPPORTED_HEALTHCHECK_OPERATION = "http.wait_ready".freeze
+      SUPPORTED_STOP_OPERATION = "process.stop".freeze
       STOP_TIMEOUT_SECONDS = 2
       READINESS_INTERVAL_SECONDS = 0.05
 
@@ -76,14 +77,17 @@ module Plywo
       def healthcheck(root:, execution:, role:, env:, setup_plan:, session:)
         return unless session
 
-        services = session.services.index_by(&:name)
+        services = session.services.each_with_object({}) do |service, result|
+          result[service.name] = service
+        end
         setup_plan.steps_for("healthcheck").each do |step|
           unless step.operation == SUPPORTED_HEALTHCHECK_OPERATION
             raise Error, "Unsupported service healthcheck operation #{step.operation.inspect}"
           end
 
-          service = services.fetch(step.details.fetch("name")) do
-            raise Error, "Readiness references service that was not started: #{step.details.fetch("name")}"
+          service_name = step.details.fetch("name")
+          service = services.fetch(service_name) do
+            raise Error, "Readiness references service that was not started: #{service_name}"
           end
           wait_until_ready(service:, step:, env:)
         end
@@ -92,7 +96,16 @@ module Plywo
       def stop(root:, execution:, role:, env:, setup_plan:, session:)
         return unless session
 
-        stop_session(session)
+        validation_error = nil
+        begin
+          validate_stop_steps!(setup_plan:, session:)
+        rescue StandardError => error
+          validation_error = error
+        ensure
+          stop_session(session)
+        end
+
+        raise validation_error if validation_error
       end
 
       private
@@ -167,6 +180,23 @@ module Plywo
           "stderr=#{tail(service.stderr_path).inspect}"
       end
 
+      def validate_stop_steps!(setup_plan:, session:)
+        steps = setup_plan.steps_for("stop_services")
+        steps.each do |step|
+          unless step.operation == SUPPORTED_STOP_OPERATION
+            raise Error, "Unsupported service stop operation #{step.operation.inspect}"
+          end
+        end
+
+        planned_names = steps.map { |step| step.details.fetch("name") }.sort
+        running_names = session.services.map(&:name).sort
+        return if planned_names == running_names
+
+        raise Error,
+          "Service stop plan does not match running services: " \
+          "planned=#{planned_names.inspect} running=#{running_names.inspect}"
+      end
+
       def stop_session(session)
         session.services.reverse_each { |service| stop_process(service) }
         FileUtils.rm_rf(session.state_dir)
@@ -183,9 +213,11 @@ module Plywo
         rescue Errno::ESRCH
           nil
         end
-        Process.wait(service.pid)
-      rescue Errno::ECHILD
-        nil
+        begin
+          Process.wait(service.pid)
+        rescue Errno::ECHILD
+          nil
+        end
       end
 
       def allocate_port
