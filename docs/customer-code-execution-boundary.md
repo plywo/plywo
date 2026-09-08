@@ -21,6 +21,22 @@ The executor inherits only a small allowlist of host environment variables. A co
 
 Adding another runtime must be implemented as another reviewed executor-owned provider. It must not turn `subject.services` into a generic command or shell DSL.
 
+## Subject runtime privilege boundary
+
+The production executor process remains privileged enough to manage disposable worktrees, bootstrap dependencies, and prepare isolated subject state. Customer runtime code does not inherit that operating-system identity.
+
+The production image declares an explicit subject identity (`PLYWO_SUBJECT_UID`, `PLYWO_SUBJECT_GID`, `PLYWO_SUBJECT_HOME`, and `PLYWO_SUBJECT_USER`) backed by the dedicated `plywo-subject` account. Immediately before customer runtime begins, Plywo assigns the disposable subject workspace to that identity and launches:
+
+- explicit Ruby/Node process services under the subject UID/GID
+- the behavioral capture process under the same subject UID/GID
+- descendants of that capture, including subject-owned workers, under the same reduced identity
+
+The identity-owned `HOME`, `USER`, and `LOGNAME` values override repository/capture environment attempts to replace them. Local development remains unchanged when no subject identity is declared.
+
+This split is a prerequisite for the isolated container-service provider. Provider authority may only become available after bootstrap/state preparation and must remain readable by the executor authority boundary, not by the `plywo-subject` runtime identity. The production build proof creates root-only authority material, then proves both a capture child and a real HTTP process service run as the subject UID/GID and cannot read it.
+
+Bootstrap and persistence preparation are intentionally not moved in this slice. They occur before provider authority is introduced. Future work that makes provider authority available earlier must first move any overlapping customer-controlled setup execution behind an equivalent unprivileged boundary.
+
 ## Explicit Compose services
 
 Compose is a separate service-provider capability, not another process runtime. A repository may explicitly select a single Compose image service with a repository-contained manifest, target port, exported URL scheme, and bounded readiness probe.
