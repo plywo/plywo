@@ -68,15 +68,17 @@ module Plywo
         subject_bootstrap: nil,
         subject_lifecycle: nil,
         setup_plan_compiler: nil,
-        capture_runtime: nil
+        capture_runtime: nil,
+        runtime_capabilities: nil
       )
         @root = Pathname(root).expand_path
         @tool_root = Pathname(tool_root).expand_path
         @command_runner = command_runner
         @fetch_repository = fetch_repository
+        runtime_capabilities ||= Plywo::Subject::RuntimeCapabilities.ruby_only
         subject_discovery ||= Plywo::Subject::Discovery.new(command_runner:)
-        setup_plan_compiler ||= Plywo::Subject::SetupPlanCompiler.new
-        subject_bootstrap ||= default_subject_bootstrap
+        setup_plan_compiler ||= Plywo::Subject::SetupPlanCompiler.new(runtime_capabilities:)
+        subject_bootstrap ||= default_subject_bootstrap(runtime_capabilities:)
         @subject_lifecycle = subject_lifecycle || Plywo::Subject::Lifecycle.new(
           discovery: subject_discovery,
           bootstrap: subject_bootstrap,
@@ -146,12 +148,13 @@ module Plywo
 
       private
 
-      def default_subject_bootstrap
+      def default_subject_bootstrap(runtime_capabilities:)
         Plywo::Subject::BootstrapExecutor.new(
           ruby_bundle_bootstrap: Plywo::Subject::RailsBundleBootstrap.new(
             command_runner: @command_runner,
             cache_root: @tool_root.join("tmp", "plywo", "bundles")
-          )
+          ),
+          runtime_capabilities:
         )
       end
 
