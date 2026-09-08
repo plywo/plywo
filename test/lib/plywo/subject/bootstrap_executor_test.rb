@@ -92,7 +92,7 @@ class PlywoSubjectBootstrapExecutorTest < ActiveSupport::TestCase
       {
         phase: "bootstrap",
         operation: "rm -rf /",
-        provenance: "repository_override"
+        provenance: "explicit"
       }
     )
 
