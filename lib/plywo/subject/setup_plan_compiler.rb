@@ -1,3 +1,5 @@
+require "pathname"
+
 module Plywo
   module Subject
     class SetupPlanCompiler
