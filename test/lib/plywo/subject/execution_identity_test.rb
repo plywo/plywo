@@ -6,6 +6,7 @@ class ExecutionIdentityTest < ActiveSupport::TestCase
 
     assert_not identity.enabled?
     assert_equal({}, identity.environment)
+    assert_equal({}, identity.environment(workspace: Rails.root))
     assert_equal({}, identity.spawn_options)
   end
 
@@ -29,6 +30,26 @@ class ExecutionIdentityTest < ActiveSupport::TestCase
       },
       identity.environment
     )
+  end
+
+  test "uses a distinct worktree-local HOME for runtime execution" do
+    identity = Plywo::Subject::ExecutionIdentity.new(
+      uid: 10_001,
+      gid: 10_001,
+      home: "/home/plywo-subject",
+      user: "plywo-subject"
+    )
+    baseline = Pathname("/tmp/plywo/base")
+    candidate = Pathname("/tmp/plywo/candidate")
+
+    baseline_env = identity.environment(workspace: baseline)
+    candidate_env = identity.environment(workspace: candidate)
+
+    assert_equal "/tmp/plywo/base/tmp/plywo/home", baseline_env.fetch("HOME")
+    assert_equal "/tmp/plywo/candidate/tmp/plywo/home", candidate_env.fetch("HOME")
+    assert_not_equal baseline_env.fetch("HOME"), candidate_env.fetch("HOME")
+    assert_equal "plywo-subject", baseline_env.fetch("USER")
+    assert_equal "plywo-subject", baseline_env.fetch("LOGNAME")
   end
 
   test "fails closed on partial identity declaration" do
