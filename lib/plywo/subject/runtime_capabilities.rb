@@ -6,10 +6,10 @@ module Plywo
       Error = Class.new(ArgumentError)
       ENV_KEY = "PLYWO_EXECUTOR_CAPABILITIES_JSON"
 
-      attr_reader :runtimes, :package_managers
+      attr_reader :runtimes, :package_managers, :service_providers
 
       def self.ruby_only(version: RUBY_VERSION)
-        new(runtimes: { "ruby" => version }, package_managers: {})
+        new(runtimes: { "ruby" => version }, package_managers: {}, service_providers: {})
       end
 
       def self.from_env(env: ENV, ruby_version: RUBY_VERSION)
@@ -23,15 +23,17 @@ module Plywo
 
         new(
           runtimes: payload.fetch("runtimes", {}),
-          package_managers: payload.fetch("package_managers", {})
+          package_managers: payload.fetch("package_managers", {}),
+          service_providers: payload.fetch("service_providers", {})
         )
       rescue JSON::ParserError => error
         raise Error, "Invalid #{ENV_KEY}: #{error.message}"
       end
 
-      def initialize(runtimes:, package_managers:)
+      def initialize(runtimes:, package_managers:, service_providers: {})
         @runtimes = normalize_mapping(runtimes, kind: "runtime").freeze
         @package_managers = normalize_mapping(package_managers, kind: "package manager").freeze
+        @service_providers = normalize_mapping(service_providers, kind: "service provider").freeze
       end
 
       def runtime?(name)
@@ -42,6 +44,10 @@ module Plywo
         package_managers.key?(name.to_s)
       end
 
+      def service_provider?(name)
+        service_providers.key?(name.to_s)
+      end
+
       def runtime_version(name)
         runtimes[name.to_s]
       end
@@ -50,10 +56,15 @@ module Plywo
         package_managers[name.to_s]
       end
 
+      def service_provider_version(name)
+        service_providers[name.to_s]
+      end
+
       def to_h
         {
           "runtimes" => runtimes,
-          "package_managers" => package_managers
+          "package_managers" => package_managers,
+          "service_providers" => service_providers
         }
       end
 
