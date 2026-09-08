@@ -3,8 +3,9 @@ module Plywo
     class BootstrapExecutor
       Error = Class.new(StandardError)
 
-      def initialize(ruby_bundle_bootstrap:, runtime_capabilities:)
+      def initialize(ruby_bundle_bootstrap:, javascript_dependencies_bootstrap:, runtime_capabilities:)
         @ruby_bundle_bootstrap = ruby_bundle_bootstrap
+        @javascript_dependencies_bootstrap = javascript_dependencies_bootstrap
         @runtime_capabilities = runtime_capabilities
       end
 
@@ -28,9 +29,7 @@ module Plywo
         when "javascript.dependencies"
           assert_javascript_dependencies_step!(step)
           assert_javascript_capabilities!(step)
-          raise Error,
-            "Bootstrap operation javascript.dependencies has declared executor capabilities " \
-            "but no typed JavaScript dependency handler is implemented yet"
+          @javascript_dependencies_bootstrap.call(root:, step:)
         else
           raise Error, "Unsupported bootstrap operation #{step.operation.inspect}"
         end
