@@ -6,14 +6,23 @@ module Plywo
     class JavascriptDependenciesBootstrap
       Error = Class.new(StandardError)
 
+      LOCKFILES_BY_MANAGER = {
+        "npm" => [ "package-lock.json" ],
+        "pnpm" => [ "pnpm-lock.yaml" ],
+        "yarn" => [ "yarn.lock" ],
+        "bun" => [ "bun.lock", "bun.lockb" ]
+      }.freeze
+
       def initialize(command_runner:)
         @command_runner = command_runner
       end
 
       def call(root:, step:)
         root = Pathname(root).expand_path
-        manifest = root.join(step.details.fetch("manifest"))
-        lockfile = root.join(step.details.fetch("lockfile"))
+        assert_step_contract!(step)
+        manifest = root.join("package.json")
+        lockfile_name = step.details.fetch("lockfile")
+        lockfile = root.join(lockfile_name)
 
         raise Error, "JavaScript subject is missing package.json at #{manifest}" unless manifest.file?
         raise Error, "JavaScript subject is missing committed lockfile at #{lockfile}" unless lockfile.file?
@@ -21,19 +30,33 @@ module Plywo
         original_manifest_digest = Digest::SHA256.file(manifest).hexdigest
         original_lockfile_digest = Digest::SHA256.file(lockfile).hexdigest
 
-        run!(command_for(step), chdir: root)
+        begin
+          run!(command_for(step), chdir: root)
+        ensure
+          assert_unchanged!(manifest, original_manifest_digest, label: "package.json")
+          assert_unchanged!(lockfile, original_lockfile_digest, label: lockfile_name)
+        end
 
-        assert_unchanged!(manifest, original_manifest_digest, label: "package.json")
-        assert_unchanged!(lockfile, original_lockfile_digest, label: step.details.fetch("lockfile"))
         {}
       end
 
       private
 
-      def command_for(step)
-        manager = step.details.fetch("manager")
+      def assert_step_contract!(step)
+        manager = step.details.fetch("manager", nil).to_s
+        lockfile = step.details.fetch("lockfile", nil).to_s
+        allowed_lockfiles = LOCKFILES_BY_MANAGER[manager]
 
-        case manager
+        raise Error, "Unsupported JavaScript package manager #{manager.inspect}" unless allowed_lockfiles
+        return if allowed_lockfiles.include?(lockfile)
+
+        raise Error,
+          "JavaScript package manager #{manager} requires one of #{allowed_lockfiles.join(", ")}; " \
+          "received #{lockfile.inspect}"
+      end
+
+      def command_for(step)
+        case step.details.fetch("manager")
         when "npm"
           %w[npm ci]
         when "pnpm"
@@ -42,8 +65,6 @@ module Plywo
           yarn_command(step)
         when "bun"
           %w[bun install --frozen-lockfile]
-        else
-          raise Error, "Unsupported JavaScript package manager #{manager.inspect}"
         end
       end
 
