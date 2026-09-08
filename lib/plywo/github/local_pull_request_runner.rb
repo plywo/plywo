@@ -85,7 +85,10 @@ module Plywo
         @execution_identity = execution_identity || Plywo::Subject::ExecutionIdentity.from_env
         @subject_command_runner = subject_command_runner || default_subject_command_runner(command_runner)
         runtime_capabilities ||= Plywo::Subject::RuntimeCapabilities.from_env
-        subject_discovery ||= Plywo::Subject::Discovery.new(command_runner:)
+        subject_discovery ||= Plywo::Subject::Discovery.new(
+          command_runner: @subject_command_runner,
+          execution_identity: @execution_identity
+        )
         setup_plan_compiler ||= Plywo::Subject::SetupPlanCompiler.new(runtime_capabilities:)
         subject_bootstrap ||= default_subject_bootstrap(runtime_capabilities:)
         service_executor ||= Plywo::Subject::ServiceExecutor.new(execution_identity: @execution_identity)
@@ -166,13 +169,17 @@ module Plywo
       end
 
       def default_subject_bootstrap(runtime_capabilities:)
+        cache_root = @execution_identity.enabled? ? nil : @tool_root.join("tmp", "plywo", "bundles")
+
         Plywo::Subject::BootstrapExecutor.new(
           ruby_bundle_bootstrap: Plywo::Subject::RailsBundleBootstrap.new(
-            command_runner: @command_runner,
-            cache_root: @tool_root.join("tmp", "plywo", "bundles")
+            command_runner: @subject_command_runner,
+            bundler_installer_command_runner: @command_runner,
+            cache_root:,
+            execution_identity: @execution_identity
           ),
           javascript_dependencies_bootstrap: Plywo::Subject::JavascriptDependenciesBootstrap.new(
-            command_runner: @command_runner
+            command_runner: @subject_command_runner
           ),
           runtime_capabilities:
         )
