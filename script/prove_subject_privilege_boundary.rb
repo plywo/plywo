@@ -19,6 +19,11 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
   secret.write("provider-authority")
   secret.chmod(0o600)
 
+  ownership_guard = root.join("ownership-guard.txt")
+  ownership_guard.write("outside-workspace")
+  ownership_before = ownership_guard.stat
+  workspace.join("escape-link").make_symlink(ownership_guard)
+
   probe = workspace.join("probe.rb")
   probe.write(<<~'RUBY')
     require "json"
@@ -83,6 +88,11 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
   RUBY
 
   identity.prepare_tree(workspace)
+
+  ownership_after = ownership_guard.stat
+  unless [ ownership_after.uid, ownership_after.gid ] == [ ownership_before.uid, ownership_before.gid ]
+    raise "subject workspace ownership followed a symlink outside the workspace"
+  end
 
   runner = Plywo::Github::LocalPullRequestRunner::CommandRunner.new(
     execution_identity: identity
@@ -181,6 +191,7 @@ Dir.mktmpdir("plywo-subject-privilege-") do |directory|
   puts "subject_privilege_boundary=ok"
   puts "subject_uid=#{identity.uid}"
   puts "subject_gid=#{identity.gid}"
+  puts "workspace_symlink_target_ownership_unchanged=true"
   puts "capture_provider_authority_readable=false"
   puts "service_provider_authority_readable=false"
 end
