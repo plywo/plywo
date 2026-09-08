@@ -80,14 +80,24 @@ module Plywo
         enabled? ? { uid:, gid: } : {}
       end
 
-      def environment
+      def environment(workspace: nil)
         return {} unless enabled?
 
         {
-          "HOME" => home.to_s,
+          "HOME" => workspace ? runtime_home(workspace).to_s : home.to_s,
           "USER" => user.to_s,
           "LOGNAME" => user.to_s
         }
+      end
+
+      def prepare_runtime_home(workspace)
+        return unless enabled?
+
+        prepare_directory(runtime_home(workspace))
+      end
+
+      def runtime_home(workspace)
+        Pathname(workspace).expand_path.join("tmp", "plywo", "home")
       end
 
       def prepare_parent_directory(path)
