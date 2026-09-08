@@ -5,6 +5,7 @@ require "securerandom"
 require "socket"
 require "tmpdir"
 require_relative "compose_service_provider"
+require_relative "isolated_compose_provider_client"
 require_relative "setup_plan"
 
 module Plywo
@@ -158,6 +159,11 @@ module Plywo
       rescue KeyError => error
         raise Error, "Invalid Compose provider start request: #{error.message}"
       rescue StandardError
+        begin
+          @provider.stop(started.handle) if started
+        rescue StandardError
+          nil
+        end
         FileUtils.rm_rf(workspace) if workspace
         raise
       end
