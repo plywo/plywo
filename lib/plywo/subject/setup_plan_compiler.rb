@@ -50,7 +50,9 @@ module Plywo
             provenance: "explicit",
             details: {
               name: service.name,
-              command: service.command,
+              runtime: service.runtime,
+              entrypoint: service.entrypoint,
+              args: service.args,
               port_env: service.port_env,
               url_env: service.url_env
             }
