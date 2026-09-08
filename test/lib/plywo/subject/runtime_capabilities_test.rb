@@ -86,6 +86,36 @@ class PlywoSubjectRuntimeCapabilitiesTest < ActiveSupport::TestCase
     refute capabilities.service_provider?("compose")
   end
 
+  test "adds a service provider discovered through an isolated provider handshake" do
+    capabilities = Plywo::Subject::RuntimeCapabilities.new(
+      runtimes: { ruby: "3.4.10" },
+      package_managers: {},
+      service_providers: {}
+    )
+
+    discovered = capabilities.with_service_provider("compose", "1")
+
+    refute capabilities.service_provider?("compose")
+    assert discovered.service_provider?("compose")
+    assert_equal "1", discovered.service_provider_version("compose")
+  end
+
+  test "rejects a discovered service-provider version that conflicts with the declaration" do
+    capabilities = Plywo::Subject::RuntimeCapabilities.new(
+      runtimes: { ruby: "3.4.10" },
+      package_managers: {},
+      service_providers: { compose: "old" }
+    )
+
+    error = assert_raises(Plywo::Subject::RuntimeCapabilities::Error) do
+      capabilities.with_service_provider("compose", "1")
+    end
+
+    assert_includes error.message, "conflicts"
+    assert_includes error.message, 'declared="old"'
+    assert_includes error.message, 'discovered="1"'
+  end
+
   test "rejects invalid executor capability JSON instead of probing the host" do
     env = {
       Plywo::Subject::RuntimeCapabilities::ENV_KEY => "{"
