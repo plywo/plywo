@@ -60,6 +60,23 @@ module Plywo
         service_providers[name.to_s]
       end
 
+      def with_service_provider(name, version)
+        name = name.to_s
+        version = version.to_s
+        existing = service_providers[name]
+        if existing && existing != version
+          raise Error,
+            "Executor service provider capability #{name.inspect} conflicts: " \
+            "declared=#{existing.inspect} discovered=#{version.inspect}"
+        end
+
+        self.class.new(
+          runtimes:,
+          package_managers:,
+          service_providers: service_providers.merge(name => version)
+        )
+      end
+
       def to_h
         {
           "runtimes" => runtimes,
