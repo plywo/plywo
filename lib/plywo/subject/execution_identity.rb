@@ -50,6 +50,8 @@ module Plywo
         @gid = gid
         @home = home
         @user = user
+        @executor_uid = Process.euid
+        @executor_gid = Process.egid
 
         return if disabled?
 
@@ -76,13 +78,35 @@ module Plywo
         }
       end
 
+      def prepare_parent_directory(path)
+        return unless enabled?
+
+        path = Pathname(path)
+        FileUtils.mkdir_p(path)
+        FileUtils.chown(@executor_uid, @executor_gid, path)
+        File.chmod(0o711, path)
+      rescue Errno::EPERM, Errno::EACCES => error
+        raise Error, "Could not protect executor directory #{path}: #{error.message}"
+      end
+
       def prepare_tree(path)
         return unless enabled?
 
         path = Pathname(path)
         FileUtils.chown_R(uid, gid, path)
+        File.chmod(0o700, path)
       rescue Errno::EPERM, Errno::EACCES => error
         raise Error, "Could not assign subject workspace ownership for #{path}: #{error.message}"
+      end
+
+      def seal_tree(path)
+        return unless enabled?
+
+        path = Pathname(path)
+        FileUtils.chown_R(@executor_uid, @executor_gid, path)
+        File.chmod(0o700, path)
+      rescue Errno::EPERM, Errno::EACCES => error
+        raise Error, "Could not seal subject workspace #{path}: #{error.message}"
       end
 
       def prepare_directory(path)
@@ -91,8 +115,30 @@ module Plywo
         path = Pathname(path)
         FileUtils.mkdir_p(path)
         FileUtils.chown(uid, gid, path)
+        File.chmod(0o700, path)
       rescue Errno::EPERM, Errno::EACCES => error
         raise Error, "Could not assign subject directory ownership for #{path}: #{error.message}"
+      end
+
+      def prepare_output(path)
+        return unless enabled?
+
+        path = Pathname(path)
+        FileUtils.touch(path)
+        FileUtils.chown(uid, gid, path)
+        File.chmod(0o600, path)
+      rescue Errno::EPERM, Errno::EACCES => error
+        raise Error, "Could not prepare subject output #{path}: #{error.message}"
+      end
+
+      def seal_output(path)
+        return unless enabled? && Pathname(path).exist?
+
+        path = Pathname(path)
+        FileUtils.chown(@executor_uid, @executor_gid, path)
+        File.chmod(0o600, path)
+      rescue Errno::EPERM, Errno::EACCES => error
+        raise Error, "Could not seal subject output #{path}: #{error.message}"
       end
 
       private
