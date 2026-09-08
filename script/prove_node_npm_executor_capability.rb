@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 
 require "active_support/core_ext/object/blank"
+require "json"
 require "pathname"
 require "tmpdir"
 
@@ -82,32 +83,30 @@ module NodeNpmExecutorCapabilityProof
   end
 
   def write_subject(root)
-    root.join("package.json").write(<<~JSON)
-      {
-        "name": "plywo-node-npm-capability-proof",
-        "version": "1.0.0",
-        "private": true,
-        "scripts": {
-          "postinstall": "node -e \"require('fs').writeFileSync('npm-bootstrap-proof.txt', process.version)\""
+    package = {
+      "name" => "plywo-node-npm-capability-proof",
+      "version" => "1.0.0",
+      "private" => true,
+      "scripts" => {
+        "postinstall" => "node -e \"require('fs').writeFileSync('npm-bootstrap-proof.txt', process.version)\""
+      }
+    }
+    lockfile = {
+      "name" => package.fetch("name"),
+      "version" => package.fetch("version"),
+      "lockfileVersion" => 3,
+      "requires" => true,
+      "packages" => {
+        "" => {
+          "name" => package.fetch("name"),
+          "version" => package.fetch("version"),
+          "hasInstallScript" => true
         }
       }
-    JSON
+    }
 
-    root.join("package-lock.json").write(<<~JSON)
-      {
-        "name": "plywo-node-npm-capability-proof",
-        "version": "1.0.0",
-        "lockfileVersion": 3,
-        "requires": true,
-        "packages": {
-          "": {
-            "name": "plywo-node-npm-capability-proof",
-            "version": "1.0.0",
-            "hasInstallScript": true
-          }
-        }
-      }
-    JSON
+    root.join("package.json").write("#{JSON.pretty_generate(package)}\n")
+    root.join("package-lock.json").write("#{JSON.pretty_generate(lockfile)}\n")
   end
 end
 
