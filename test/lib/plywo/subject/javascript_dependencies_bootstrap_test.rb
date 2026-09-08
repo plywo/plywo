@@ -5,14 +5,17 @@ class PlywoSubjectJavascriptDependenciesBootstrapTest < ActiveSupport::TestCase
   class RecordingRunner
     attr_reader :calls
 
-    def initialize(after_call: nil)
+    def initialize(after_call: nil, error: nil)
       @after_call = after_call
+      @error = error
       @calls = []
     end
 
     def call(env:, command:, chdir:)
       @calls << { env:, command:, chdir: }
       @after_call&.call(Pathname(chdir))
+      raise @error if @error
+
       ""
     end
   end
@@ -59,6 +62,22 @@ class PlywoSubjectJavascriptDependenciesBootstrapTest < ActiveSupport::TestCase
     end
   end
 
+  test "checks committed files even when the install command fails" do
+    with_subject(lockfile: "pnpm-lock.yaml") do |root|
+      runner = RecordingRunner.new(
+        after_call: ->(path) { path.join("pnpm-lock.yaml").write("mutated-before-failure\n") },
+        error: RuntimeError.new("install failed")
+      )
+      bootstrap = Plywo::Subject::JavascriptDependenciesBootstrap.new(command_runner: runner)
+
+      error = assert_raises(Plywo::Subject::JavascriptDependenciesBootstrap::Error) do
+        bootstrap.call(root:, step: dependency_step(manager: "pnpm", lockfile: "pnpm-lock.yaml"))
+      end
+
+      assert_equal "JavaScript dependency bootstrap mutated committed pnpm-lock.yaml", error.message
+    end
+  end
+
   test "fails closed if dependency installation mutates package.json" do
     with_subject(lockfile: "package-lock.json") do |root|
       runner = RecordingRunner.new(
@@ -71,6 +90,23 @@ class PlywoSubjectJavascriptDependenciesBootstrapTest < ActiveSupport::TestCase
       end
 
       assert_equal "JavaScript dependency bootstrap mutated committed package.json", error.message
+    end
+  end
+
+  test "rejects a lockfile that does not belong to the selected manager" do
+    with_subject(lockfile: "pnpm-lock.yaml") do |root|
+      runner = RecordingRunner.new
+      bootstrap = Plywo::Subject::JavascriptDependenciesBootstrap.new(command_runner: runner)
+
+      error = assert_raises(Plywo::Subject::JavascriptDependenciesBootstrap::Error) do
+        bootstrap.call(root:, step: dependency_step(manager: "npm", lockfile: "pnpm-lock.yaml"))
+      end
+
+      assert_equal(
+        'JavaScript package manager npm requires one of package-lock.json; received "pnpm-lock.yaml"',
+        error.message
+      )
+      assert_empty runner.calls
     end
   end
 
