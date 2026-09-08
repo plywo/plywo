@@ -16,7 +16,13 @@ class PlywoSubjectIsolatedComposeProviderTest < ActiveSupport::TestCase
     end
 
     def start(root:, role:, step:)
-      @starts << { root: Pathname(root), role:, step: }
+      root = Pathname(root).realpath
+      @starts << {
+        root: root.to_s,
+        manifest: root.join("compose.yml").read,
+        role:,
+        step:
+      }
       FakeStarted.new(
         handle: FakeHandle.new(project_name: "plywo-test-project"),
         host: "127.0.0.1",
@@ -59,8 +65,9 @@ class PlywoSubjectIsolatedComposeProviderTest < ActiveSupport::TestCase
 
       thread.join
       call = provider.starts.fetch(0)
-      refute_equal root.realpath, call.fetch(:root).realpath
-      assert_equal root.join("compose.yml").read, call.fetch(:root).join("compose.yml").read
+      refute_equal root.realpath.to_s, call.fetch(:root)
+      assert_equal root.join("compose.yml").read, call.fetch(:manifest)
+      refute Pathname(call.fetch(:root)).exist?
       assert_equal "candidate", call.fetch(:role)
       assert_equal "redis", call.fetch(:step).details.fetch("service")
       assert_equal 1, provider.stops.length
