@@ -66,9 +66,9 @@ module Plywo
         Started.new(
           handle: Handle.new(id: payload.fetch("handle_id")),
           host: payload.fetch("host"),
-          port: Integer(payload.fetch("port"), 10)
+          port: Integer(payload.fetch("port"))
         )
-      rescue KeyError, ArgumentError => error
+      rescue KeyError, ArgumentError, TypeError => error
         raise Error, "Invalid service provider start response: #{error.message}"
       end
 
