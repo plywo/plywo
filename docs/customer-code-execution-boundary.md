@@ -21,25 +21,30 @@ The executor inherits only a small allowlist of host environment variables. A co
 
 Adding another runtime must be implemented as another reviewed executor-owned provider. It must not turn `subject.services` into a generic command or shell DSL.
 
-## Subject runtime privilege boundary
+## Subject execution privilege boundary
 
-The production executor process remains privileged enough to manage disposable worktrees, bootstrap dependencies, and prepare isolated subject state. Customer runtime code does not inherit that operating-system identity.
+The production executor retains its operating-system identity for executor-owned control operations such as Git/worktree management and installation of the selected Bundler tool version. Repository-controlled code does not execute with that identity.
 
-The production image declares an explicit subject identity (`PLYWO_SUBJECT_UID`, `PLYWO_SUBJECT_GID`, `PLYWO_SUBJECT_HOME`, and `PLYWO_SUBJECT_USER`) backed by the dedicated `plywo-subject` account. Immediately before customer runtime begins, Plywo assigns the disposable subject workspace to that identity and launches:
+The production image declares an explicit subject identity (`PLYWO_SUBJECT_UID`, `PLYWO_SUBJECT_GID`, `PLYWO_SUBJECT_HOME`, and `PLYWO_SUBJECT_USER`) backed by the dedicated `plywo-subject` account. Plywo assigns each disposable checkout/state directory to that identity and uses it for every customer-controlled execution phase:
 
-- explicit Ruby/Node process services under the subject UID/GID
-- the behavioral capture process under the same subject UID/GID
-- descendants of that capture, including subject-owned workers, under the same reduced identity
+- Bundler evaluation/install of the customer Gemfile and locked dependencies
+- npm/pnpm/Yarn/Bun dependency installation and their lifecycle scripts
+- Rails persistence preparation, including application code loaded by `db:prepare`
+- explicit Ruby/Node process services
+- the behavioral capture process
+- descendants of capture, including subject-owned workers
+
+The only Bundler operation allowed to remain executor-owned is selecting/installing the **Bundler tool itself** from the exact `BUNDLED WITH` version. Customer Gemfile evaluation still occurs only through the subject runner.
 
 The identity-owned `HOME`, `USER`, and `LOGNAME` values override repository/capture environment attempts to replace them. Local development remains unchanged when no subject identity is declared.
 
-This split is a prerequisite for the isolated container-service provider. Provider authority may only become available after bootstrap/state preparation and must remain readable by the executor authority boundary, not by the `plywo-subject` runtime identity. The production build proof creates root-only authority material, then proves both a capture child and a real HTTP process service run as the subject UID/GID and cannot read it.
+Writable dependency state is also isolated. When the production subject identity is enabled, Ruby bundle cache state is worktree-local rather than a mutable cache shared by baseline and candidate. JavaScript dependency state was already created inside each disposable worktree.
 
-Bootstrap and persistence preparation are intentionally not moved in this slice. They occur before provider authority is introduced. Future work that makes provider authority available earlier must first move any overlapping customer-controlled setup execution behind an equivalent unprivileged boundary.
+This privilege split is a prerequisite for the isolated container-service provider. Provider authority can remain readable by the executor authority boundary while being inaccessible to customer setup/runtime code. The production build proof creates root-only authority material, proves a customer command and a real HTTP process service execute as the subject UID/GID and cannot read it, and verifies recursive workspace ownership does not change a symlink target outside the workspace.
 
 ## Explicit Compose services
 
-Compose is a separate service-provider capability, not another process runtime. A repository may explicitly select a single Compose image service with a repository-contained manifest, target port, exported URL scheme, and bounded readiness probe.
+Compose is a separate service-provider capability, not another process runtime. A repository may explicitly select a single Compose image service with a repository-contained manifest, target port, exported URL scheme/env, and bounded readiness probe.
 
 The first Compose provider is deliberately restrictive:
 
@@ -60,7 +65,7 @@ The host-capable Compose proof runs a real Redis image, waits for TCP readiness,
 
 The current remote production executor intentionally does **not** declare the Compose service-provider capability and does not contain the Docker CLI. Its container is not given `/var/run/docker.sock`.
 
-This is a security boundary, not a missing convenience flag. The same executor currently launches customer Ruby/Node processes. Giving that process boundary direct Docker daemon access would let customer code attempt to control the Docker host. Production Compose therefore remains fail-closed until Plywo has a separate isolated sandbox/service-provider boundary that can hold container-management authority without exposing it to customer processes.
+This is a security boundary, not a missing convenience flag. Giving customer code direct Docker daemon access would let it attempt to control the Docker host. Production Compose therefore remains fail-closed until Plywo has a separate isolated sandbox/service-provider boundary that can hold container-management authority without exposing it to the `plywo-subject` execution identity.
 
 The production Docker build contains an invariant that fails if `service_providers.compose` is accidentally declared or the Docker CLI becomes available in the current executor image.
 
